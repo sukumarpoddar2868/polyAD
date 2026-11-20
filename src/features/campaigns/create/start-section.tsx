@@ -6,14 +6,14 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { Callout } from "@/components/ui/surface";
-import { CURRENCIES, CURRENCY } from "../engine/presets.ts";
 import { generateSetupAction } from "../ai/actions";
-import { REACH_SCOPES, SCOPE_INFO } from "../ai/prompts.ts";
+import { SeatChooser } from "@/features/constituencies/components/seat-chooser";
+import { useSeats } from "./use-seats";
 import { COPY_LANGUAGES, LANGUAGE_INFO, describeHits } from "../ai/political.ts";
 import { OBJECTIVE_OPTIONS, defaultCta, defaultDestination, destinationOptions, type ObjectiveId } from "./blueprint";
 import { DestinationDetails } from "./destination-details";
 import type { SectionProps } from "./create-campaign";
-import { ChipInput, ChoiceCard, Group, Header, Segmented, TextArea, set } from "./sections";
+import { ChoiceCard, Group, Header, Segmented, TextArea, set } from "./sections";
 
 /**
  * Start: goal (objective) → destination → about the business → customers →
@@ -31,6 +31,9 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
   const [notice, setNotice] = useState<string | null>(null);
   const [flags, setFlags] = useState<string[]>([]);
   const fe = (k: string) => fieldErrors[k];
+  // Nothing chosen yet → the candidate's own seat.
+  const seatsCtl = useSeats(draft, update);
+  const seatList = seatsCtl.chosen.length ? seatsCtl.chosen : client?.seat ? [client.seat] : [];
 
   const chooseObjective = (id: ObjectiveId | "") =>
     update((d) => ({
@@ -52,6 +55,10 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
     setNotice(null);
     setFlags([]);
     const objectiveId = draft.objective;
+    if (!seatList.length) {
+      setFieldErrors({ seats: "Choose at least one constituency." });
+      return;
+    }
     start(async () => {
       const r = await generateSetupAction({
         clientId: draft.clientId!,
@@ -61,10 +68,8 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
         website: s.website.trim(),
         about: s.about,
         offer: s.offer,
-        cities: s.cities,
-        scope: s.scope,
+        seats: seatList.map((x) => x.no),
         language: s.language,
-        currency: draft.campaign.currency,
       });
       if (!r.ok) {
         setError(r.error);
@@ -72,16 +77,17 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
         return;
       }
       const c = r.copy;
-      const seatTag = r.seat ? { no: r.seat.no, name: r.seat.name, coverage: r.seat.coverage } : null;
-      const pins = [...(r.seat?.pins ?? []), ...r.pins];
       setFlags(describeHits(r.flags));
       update((d) => ({
         ...d,
         generated: true,
+        setup: { ...d.setup, seats: r.seats.map(({ no, name }) => ({ no, name })) },
         campaign: { ...d.campaign, name: c.campaign_name, amount: String(c.daily_budget), budgetType: "daily" },
         audience: {
           ...d.audience,
-          locations: pins.map((p, i) => ({ name: p.name, lat: p.lat, lng: p.lng, radiusKm: p.radius_km, why: p.why, geo: p.geo, seat: seatTag && i < (r.seat?.pins.length ?? 0) ? seatTag : null })),
+          locations: r.seats.flatMap((st) =>
+            st.pins.map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, radiusKm: p.radius_km, why: p.why, geo: p.geo, seat: { no: st.no, name: st.name, coverage: st.coverage } })),
+          ),
           ageMin: c.age_min,
           ageMax: c.age_max,
           gender: c.gender,
@@ -119,7 +125,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
       setNotice(
         r.usedFallback
           ? "The AI was busy, so we drafted simple text from your brief. Everything else is filled — review and edit."
-          : `Done — ${r.seat ? `seat ${r.seat.no} · ${r.seat.name} (${r.seat.pins.length} circles)` : `${r.pins.length} area${r.pins.length === 1 ? "" : "s"}`}, budget and ad text are filled in. Review each step and edit anything.${r.notes.length ? ` Note: ${r.notes.join(" ")}` : ""}`,
+          : `Done — ${r.seats.map((st) => `${st.no} · ${st.name}`).join(", ")} (${r.seats.reduce((n, st) => n + st.pins.length, 0)} circles), budget and ad text are filled in. Review each step and edit anything.`,
       );
     });
   };
@@ -190,6 +196,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
                       clientId: next?.id ?? null,
                       setup: { ...d.setup, businessName: next?.name ?? d.setup.businessName },
                     }));
+                    seatsCtl.setSeats(next?.seat ? [next.seat] : []);
                   }}
                 >
                   <option value="">Choose a candidate…</option>
@@ -270,32 +277,13 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
             />
           </div>
           <Field
-            id="cities"
-            label="Target cities (optional)"
-            error={fe("cities")}
-            hint={client?.seat ? `Leave empty to target the candidate's whole seat: ${client.seat.no} · ${client.seat.name}.` : "Or set the candidate's constituency on their profile."}
+            id="seats"
+            label="Constituencies"
+            error={fe("seats")}
+            hint={`Ads reach voters in these Assembly seats (up to 5). ${client?.seat ? "" : "Tip: set the candidate's own seat on their profile."}`.trim()}
           >
-            <ChipInput id="cities" values={s.cities} onChange={(v) => set(update, "setup", { cities: v })} placeholder="e.g. Bangalore" />
+            <SeatChooser id="seats" value={seatList} onChange={seatsCtl.setSeats} suggest={client?.seat ?? null} />
           </Field>
-          <div className="flex flex-col gap-2">
-            <span className="text-[13px] font-bold">How wide?</span>
-            <Segmented
-              label="Reach scope"
-              value={s.scope}
-              onChange={(v) => set(update, "setup", { scope: v })}
-              options={REACH_SCOPES.map((x) => ({ value: x, label: SCOPE_INFO[x].label }))}
-            />
-            <p className="text-[13px] text-ink-muted">{SCOPE_INFO[s.scope].blurb}</p>
-          </div>
-          <div className="flex flex-col gap-2">
-            <span className="text-[13px] font-bold">Currency</span>
-            <Segmented
-              label="Currency"
-              value={draft.campaign.currency}
-              onChange={(v) => set(update, "campaign", { currency: v, amount: String(CURRENCY[v].defaultDailyBudget) })}
-              options={CURRENCIES.map((x) => ({ value: x, label: `${CURRENCY[x].symbol} ${x}` }))}
-            />
-          </div>
         </Group>
 
         {/* 4. Generate */}

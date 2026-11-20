@@ -1,53 +1,18 @@
 import "server-only";
 import { groqJson } from "@/lib/ai/groq";
-import { resolvePicks } from "../geo/resolve.ts";
 import type { Currency, PolyadDestination } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
 import {
   cardsPrompt,
   sanitizeCards,
   type CardIdea,
-  LocationGuess,
   fallbackCopy,
-  locationPrompt,
   sanitizeCopy,
   type CopySuggestion,
-  type Pin,
-  type ReachScope,
   politicalAudience,
   politicalCopyPrompt,
 } from "./prompts.ts";
 import { describeHits, guardrailHits, type CandidateBrief, type CopyLanguage, type GuardrailHit } from "./political.ts";
-
-/**
- * City names → target areas. The AI only names places; Meta's location list
- * and OpenStreetMap supply ids and coordinates (see geo/resolve.ts).
- */
-export async function resolveLocations(p: {
-  cities: string[];
-  businessName: string;
-  about: string;
-  country: string;
-  countryIso: string;
-  scope: ReachScope;
-  token: string | null;
-}): Promise<{ pins: Pin[]; notes: string[] }> {
-  const prompt = locationPrompt(p);
-  let picks: { area: string; city: string; state: string; why: string }[] | null = null;
-  for (let attempt = 0; attempt < 2 && !picks; attempt++) {
-    try {
-      const parsed = LocationGuess.safeParse(JSON.parse(await groqJson(prompt, { maxTokens: 3000, temperature: 0.1 })));
-      if (parsed.success) picks = parsed.data.picks;
-    } catch {
-      // retry
-    }
-  }
-  // AI unavailable → still resolve the typed cities directly.
-  picks ??= p.cities.map((c) => ({ area: c, city: c, state: "", why: "" }));
-  const r = await resolvePicks(p.token, picks, p.scope, p.countryIso);
-  if (!r.areas.length) throw new Error(r.notes[0] ?? "Couldn't find those cities. Check the spelling, or add areas on the map.");
-  return { pins: r.areas.map((a) => ({ ...a, why: a.why })), notes: r.notes };
-}
 
 /** Every voter-facing string in a suggestion, for the guardrail check. */
 export const copyTexts = (c: CopySuggestion) => [

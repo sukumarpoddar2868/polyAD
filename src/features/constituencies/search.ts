@@ -9,6 +9,9 @@ export type SeatSummary = {
   centroid: [number, number];
 };
 
+/** Seats per campaign: Meta allows 200 locations per ad set; a seat uses up to 40 circles. */
+export const MAX_SEATS = 5;
+
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** Match by seat number, seat name, district or Lok Sabha seat; seat-name hits first. */

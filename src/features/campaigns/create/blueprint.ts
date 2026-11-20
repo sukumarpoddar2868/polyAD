@@ -5,7 +5,6 @@
  */
 import { CTA_FOR, CURRENCY, POLYAD_DESTINATIONS, POLYAD_OBJECTIVES, type Currency } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
-import type { ReachScope } from "../ai/prompts.ts";
 import type { CopyLanguage } from "../ai/political.ts";
 import type { MediaRef } from "../media/rules";
 
@@ -193,8 +192,8 @@ export type Draft = {
     website: string;
     about: string;
     offer: string;
-    cities: string[];
-    scope: ReachScope;
+    /** Assembly constituencies to target (the AI covers each with circles). */
+    seats: { no: number; name: string }[];
     /** Language the AI writes the ad text in. */
     language: CopyLanguage;
   };
@@ -262,7 +261,7 @@ export type Draft = {
 export const initialDraft = (client: { id: number; name: string } | null): Draft => ({
   objective: null,
   clientId: client?.id ?? null,
-  setup: { businessName: client?.name ?? "", website: "", about: "", offer: "", cities: [], scope: "hyper-local", language: "hi" },
+  setup: { businessName: client?.name ?? "", website: "", about: "", offer: "", seats: [], language: "hi" },
   generated: false,
   launched: null,
   campaign: { name: "", budgetType: "daily", amount: String(CURRENCY.INR.defaultDailyBudget), currency: "INR", startDate: "", endDate: "", frequencyCap: 2 },
@@ -296,6 +295,8 @@ export function normalizeDraft(d: Draft): Draft {
   if ((out.objective as string) === "OUTCOME_SALES") out.objective = "OUTCOME_TRAFFIC";
   if ((out.ad.destination as string) === "whatsapp") out.ad = { ...out.ad, destination: out.objective ? defaultDestination(out.objective) : "lead_form" };
   // Keep the button valid for the destination (lists can change between versions).
+  // PolyAd targets constituencies only: older drafts drop city/pin areas.
+  out.audience = { ...out.audience, locations: out.audience.locations.filter((p) => p.seat) };
   if (out.objective && !CTA_FOR[out.ad.destination].includes(out.ad.cta)) out.ad = { ...out.ad, cta: defaultCta(out.objective, out.ad.destination) };
   return out;
 }

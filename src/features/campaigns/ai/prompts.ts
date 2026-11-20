@@ -8,18 +8,6 @@ import { CURRENCY, type Currency, type PolyadDestination } from "../engine/prese
 import type { CtaType } from "../engine/schema.ts";
 import { ELECTION_RULES, LANGUAGE_INFO, candidateLines, type CandidateBrief, type CopyLanguage } from "./political.ts";
 
-/* ---------- Locations ---------- */
-
-export const REACH_SCOPES = ["hyper-local", "local", "city-wide", "metro"] as const;
-export type ReachScope = (typeof REACH_SCOPES)[number];
-
-export const SCOPE_INFO: Record<ReachScope, { label: string; blurb: string }> = {
-  "hyper-local": { label: "Hyper-local", blurb: "Up to 3 neighbourhoods per city (big cities). Small towns: the whole town" },
-  local: { label: "Local", blurb: "The town or city itself" },
-  "city-wide": { label: "City-wide", blurb: "The city + 17 km around it" },
-  metro: { label: "Metro", blurb: "The city + 40 km around it — regional brands" },
-};
-
 /**
  * One target area after lookup. `geo` = a Meta location id; null = a lat/lng circle.
  * lat/lng are null only for a Meta area the map couldn't place (it is still targeted by its id).
@@ -33,67 +21,6 @@ export const Pin = z.object({
   geo: z.object({ kind: z.enum(["city", "neighborhood", "subcity", "zip"]), key: z.string().min(1).max(40) }).nullable().default(null),
 });
 export type Pin = z.output<typeof Pin>;
-
-/** What the AI returns: names only. Coordinates come from Meta / OpenStreetMap, never the model. */
-export const LocationGuess = z.object({
-  picks: z
-    .array(
-      z.object({
-        area: z.string().trim().min(1).max(80),
-        city: z.string().trim().min(1).max(80),
-        state: z.string().trim().max(80).default(""),
-        why: z.string().trim().max(300).default(""),
-      }),
-    )
-    .min(1)
-    .max(30),
-});
-
-export function locationPrompt(p: {
-  cities: string[];
-  businessName: string;
-  about: string;
-  country: string;
-  scope: ReachScope;
-}): string {
-  return `You are choosing target areas for a Meta (Facebook + Instagram) ad campaign.
-
-Cities the user entered:
-${p.cities.map((c) => `  • ${c}`).join("\n")}
-
-Business:
-  Name:        ${p.businessName || "(not provided)"}
-  Description: ${p.about || "(not provided)"}
-  Country:     ${p.country}
-  Reach scope: ${p.scope}
-
-Return NAMES ONLY — never coordinates. Names are looked up on Meta's location
-list and maps, so use the common, official spelling (e.g. "Koramangala",
-"HSR Layout", "Andheri West", "Salt Lake").
-
-For every entered city, give its official name in "city" and its state/province
-in "state" (e.g. city "Bengaluru" or "Bangalore", state "Karnataka").
-
-If reach scope is "hyper-local":
-  → For each city return up to 3 well-known neighbourhoods / localities most
-    likely to hold this business's customers, one pick each, with "area" = the
-    neighbourhood name only (no city in it).
-  → Only use real, widely known neighbourhood names. For a small town with no
-    well-known neighbourhoods, return ONE pick with "area" = the town name.
-  → "why": one short sentence naming the area and why it fits the business.
-
-Otherwise ("local", "city-wide", "metro"):
-  → ONE pick per city with "area" = the city name itself; "why" one sentence.
-
-Return one JSON object:
-{ "picks": [ { "area": "Koramangala", "city": "Bangalore", "state": "Karnataka", "why": "..." } ] }`;
-}
-
-export function expectedPins(cityCount: number, scope: ReachScope) {
-  return scope === "hyper-local" ? cityCount * 3 : cityCount;
-}
-
-/* ---------- Ad copy + campaign basics ---------- */
 
 export const AGE_MIN = 18;
 export const AGE_MAX = 65;
