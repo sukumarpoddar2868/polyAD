@@ -10,7 +10,7 @@ import type { SeatSummary } from "../search";
 const label = (s: SeatSummary) => `${s.no} · ${s.name}${s.reserved ? ` (${s.reserved})` : ""}`;
 
 /** "Add a constituency": search UP seats, turn the chosen one into Meta circles. */
-export function SeatPicker({ taken, room, onAdd }: { taken: number[]; room: number; onAdd: (pins: DraftPin[]) => void }) {
+export function SeatPicker({ taken, room, onAdd, suggest }: { taken: number[]; room: number; onAdd: (pins: DraftPin[]) => void; suggest?: { no: number; name: string } | null }) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SeatSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export function SeatPicker({ taken, room, onAdd }: { taken: number[]; room: numb
     };
   }, [q]);
 
-  const pick = (s: SeatSummary) => {
+  const pick = (s: Pick<SeatSummary, "no" | "name">) => {
     setQ("");
     setHits([]);
     setError(null);
@@ -46,6 +46,16 @@ export function SeatPicker({ taken, room, onAdd }: { taken: number[]; room: numb
       <label htmlFor="add-seat" className="text-[13px] font-bold">
         Add an Assembly constituency
       </label>
+      {suggest && !taken.includes(suggest.no) && (
+        <button
+          type="button"
+          onClick={() => pick(suggest)}
+          disabled={pending}
+          className="flex w-fit items-center gap-2 rounded-pill bg-lavender-soft px-4 py-2 text-[14px] font-bold hover:bg-lavender"
+        >
+          <Landmark className="size-4 text-lavender-deep" aria-hidden /> Add the candidate&apos;s seat: {suggest.no} · {suggest.name}
+        </button>
+      )}
       <Input id="add-seat" value={q} placeholder="e.g. Lucknow Central · 174 · Gorakhpur" onChange={(e) => setQ(e.target.value)} autoComplete="off" />
       {q.trim() !== "" && hits.length > 0 && (
         <ul className="flex flex-col rounded-card bg-paper p-1 shadow-md" role="listbox" aria-label="Matching constituencies">

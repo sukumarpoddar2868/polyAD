@@ -18,6 +18,7 @@ import { ctaLabel } from "./ad-preview";
 import { MEDIA_RULES } from "../media/rules";
 import { CAROUSEL_MIN, DESTINATION_LABELS, audienceReady, cardReady, destinationReady, leadFormReady, mediaReady, type AdFormat, type Draft, type SectionId } from "./blueprint";
 import type { SectionProps } from "./create-campaign";
+import { describeHits, guardrailHits } from "../ai/political.ts";
 
 /* ------------------------------------------------------------------ shared */
 
@@ -390,6 +391,44 @@ export function PlacementsSection({ draft, update, goTo }: SectionProps) {
 
 /* ------------------------------------------------------------------ Ad */
 
+/** Live election-rule check on every voter-facing text (same check the server runs at launch). */
+function CopyCheck({ draft, update, allow }: { draft: Draft; update: SectionProps["update"]; allow: string[] }) {
+  const ad = draft.ad;
+  const lead = ad.destination === "lead_form";
+  const wa = ad.destination === "whatsapp";
+  const hits = guardrailHits(
+    [
+      ad.primaryText,
+      ad.headline,
+      ad.description,
+      ...(ad.format === "carousel" ? ad.carousel.cards.flatMap((c) => [c.headline, c.description]) : []),
+      ...(lead ? [...ad.leadForm.questions, ad.leadForm.thankYou] : []),
+      ...(wa ? [ad.whatsapp.greeting, ad.whatsapp.prefill, ...ad.whatsapp.questions] : []),
+    ],
+    allow,
+  );
+  if (!hits.length) {
+    return <p className="rounded-input bg-chartreuse-soft px-3 py-2 text-[13px]">Election-rule check: no problem words found. Still read it once — the check can&apos;t judge false claims.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-card bg-tomato-soft p-4 text-[14px]">
+      <p className="font-bold">This text may break election rules (RPA s.123 / Model Code of Conduct):</p>
+      <ul className="list-disc pl-5">
+        {describeHits(hits).map((l) => (
+          <li key={l}>{l}</li>
+        ))}
+      </ul>
+      <label className="flex items-start gap-3">
+        <input type="checkbox" className="mt-0.5 size-4 accent-lavender-deep" checked={ad.copyReviewed} onChange={(e) => set(update, "ad", { copyReviewed: e.target.checked })} />
+        <span>
+          <span className="block font-bold">Reviewed — the text is fine in context</span>
+          <span className="block text-ink-muted">Launch stays blocked until the words are removed or someone ticks this.</span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 export function CreativeSection({ draft, update, clients, goTo }: SectionProps) {
   const ad = draft.ad;
   const client = clients.find((c) => c.id === draft.clientId);
@@ -399,11 +438,55 @@ export function CreativeSection({ draft, update, clients, goTo }: SectionProps) 
     <>
       <Header level="Ad" title="Creative" blurb="What people see, and where they go when they tap." />
       <div className="flex flex-col gap-6">
-        <Group title="Identity" hint="The ad runs from the client's Page and Instagram account.">
+        <Group title="Identity" hint="The ad runs from the candidate's Page and Instagram account, labelled as a political ad.">
           <div className="flex flex-wrap gap-2">
             <Chip>Facebook · {client?.pageName ?? "No Page"}</Chip>
             <Chip>Instagram · {client?.instagramUsername ? `@${client.instagramUsername}` : "uses Facebook Page"}</Chip>
+            <Chip>Paid for by · {client?.paidForBy ?? "not set"}</Chip>
           </div>
+          <label className="flex items-start gap-3 rounded-card bg-lavender-soft p-4 text-[14px]">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-lavender-deep"
+              checked={ad.digitallyCreated}
+              onChange={(e) => set(update, "ad", { digitallyCreated: e.target.checked })}
+            />
+            <span>
+              <span className="block font-bold">Image or video is AI-made or digitally altered</span>
+              <span className="block text-ink-muted">
+                Tick if it shows a realistic person or event that was generated or edited (not simple crops, colour or text). Meta requires this disclosure on political ads.
+              </span>
+            </span>
+          </label>
+        </Group>
+
+        <Group title="MCMC certificate" hint="Election Commission rule: every political ad must be pre-certified by the Media Certification & Monitoring Committee before it runs.">
+          {client?.certificates.length ? (
+            <Field id="mcmcCertificate" label="Certificate for this ad">
+              <Select
+                id="mcmcCertificate"
+                value={client.certificates.some((c) => c.id === ad.mcmcCertificateId) ? String(ad.mcmcCertificateId) : ""}
+                onChange={(e) => set(update, "ad", { mcmcCertificateId: e.target.value ? Number(e.target.value) : null })}
+              >
+                <option value="">Pick a certificate…</option>
+                {client.certificates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title} — No. {c.certNo} ({c.issuedOn})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : (
+            <p className="rounded-input bg-tomato-soft px-3 py-2 text-[13px] text-tomato-700">
+              No certificates on file for this candidate. Add one on the candidate page{client ? (
+                <>
+                  {" "}
+                  (<a href={`/clients/${client.id}`} className="font-bold underline">open</a>)
+                </>
+              ) : null}
+              ; launch is blocked until then.
+            </p>
+          )}
         </Group>
 
         <Group title="Media" hint="Choose the ad format, then upload your files.">
@@ -478,8 +561,9 @@ export function CreativeSection({ draft, update, clients, goTo }: SectionProps) 
         </Group>
 
         <Group title="Text">
+          <CopyCheck draft={draft} update={update} allow={client?.allowTerms ?? []} />
           <Field id="primaryText" label="Primary text">
-            <TextArea id="primaryText" max={400} value={ad.primaryText} onChange={(v) => set(update, "ad", { primaryText: v })} placeholder="What's the offer, and why now?" />
+            <TextArea id="primaryText" max={400} value={ad.primaryText} onChange={(v) => set(update, "ad", { primaryText: v })} placeholder="Who the candidate is, and what you ask of voters." />
           </Field>
           {ad.format === "single" && (
           <div className="grid gap-4 sm:grid-cols-2">

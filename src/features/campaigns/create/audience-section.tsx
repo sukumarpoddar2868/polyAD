@@ -219,7 +219,7 @@ export function AudienceSection({ draft, update, goTo, clients }: SectionProps) 
             </ul>
           )}
 
-          <SeatPicker taken={seats.map((s) => s.no)} room={200 - a.locations.length} onAdd={(pins) => setPins((all) => [...all, ...pins])} />
+          <SeatPicker taken={seats.map((s) => s.no)} room={200 - a.locations.length} suggest={clients.find((c) => c.id === draft.clientId)?.seat ?? null} onAdd={(pins) => setPins((all) => [...all, ...pins])} />
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="add-area" className="text-[13px] font-bold">

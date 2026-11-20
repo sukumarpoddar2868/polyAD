@@ -255,3 +255,15 @@ test("pilot guard: blocks website leads, allows instant form", () => {
   assert.throws(() => checkPilotGuard(website, false), PilotGuardError);
   assert.doesNotThrow(() => checkPilotGuard(website, true));
 });
+
+test("political ads: category + country on the campaign, POLITICAL label on the ad", () => {
+  const c = fixtures.valid.find((x) => x.name === "render_website_inr_epicenters")!;
+  const ops = buildAll(validateSpec(renderSpec({ ...toRenderInput(c.render_kwargs!), specialAdCategory: "ISSUES_ELECTIONS_POLITICS", country: "India" })));
+  assert.deepEqual(ops[0].payload.special_ad_categories, ["ISSUES_ELECTIONS_POLITICS"]);
+  assert.deepEqual(ops[0].payload.special_ad_category_country, ["IN"]);
+  assert.equal(ops[2].payload.authorization_category, "POLITICAL");
+  const ai = buildAll(validateSpec(renderSpec({ ...toRenderInput(c.render_kwargs!), specialAdCategory: "ISSUES_ELECTIONS_POLITICS", country: "India", digitallyCreatedMedia: true })));
+  assert.equal(ai[2].payload.authorization_category, "POLITICAL_WITH_DIGITALLY_CREATED_MEDIA");
+  const plain = buildAll(validateSpec(renderSpec(toRenderInput(c.render_kwargs!))));
+  assert.equal("authorization_category" in plain[2].payload, false);
+});

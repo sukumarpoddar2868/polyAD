@@ -5,6 +5,9 @@ import { Callout } from "@/components/ui/surface";
 import { CreateCampaign, type ClientOption } from "@/features/campaigns/create/create-campaign";
 import type { Draft } from "@/features/campaigns/create/blueprint";
 import { loadDraft } from "@/features/campaigns/store";
+import { politicalGaps } from "@/features/clients/political";
+import { getSeat } from "@/features/constituencies/seats";
+import { listAllCertificates } from "@/features/compliance/data";
 
 export const metadata: Metadata = { title: "New campaign" };
 
@@ -15,11 +18,12 @@ export default async function NewCampaignPage({ searchParams }: PageProps<"/camp
   const saved = wanted ? await loadDraft(user.id, wanted) : null;
   if (user.accountType === "business") await ensureSelfClient(user);
 
-  const clients: ClientOption[] = (await listClients(user.id))
+  const [rows, certs] = await Promise.all([listClients(user.id), listAllCertificates(user.id)]);
+  const clients: ClientOption[] = rows
     .filter((c) => c.meta_connection_id)
     .map((c) => ({
       id: c.id,
-      name: c.business_name ?? "Untitled client",
+      name: c.business_name ?? "Untitled candidate",
       ready: Boolean(c.ad_account_id && c.page_id),
       adAccountName: c.ad_account_name,
       pageName: c.page_name,
@@ -29,6 +33,11 @@ export default async function NewCampaignPage({ searchParams }: PageProps<"/camp
       pixelId: c.pixel_id,
       pixelName: c.pixel_name,
       hasInstagram: Boolean(c.instagram_actor_id),
+      politicalGaps: politicalGaps(c),
+      paidForBy: c.paid_for_by,
+      seat: c.ac_no ? { no: c.ac_no, name: getSeat(c.ac_no)?.name ?? `Seat ${c.ac_no}` } : null,
+      allowTerms: [c.candidate_name, c.business_name, c.party, c.symbol, c.ac_no ? getSeat(c.ac_no)?.name : null].filter((x): x is string => Boolean(x)),
+      certificates: certs.filter((x) => x.client_id === c.id).map((x) => ({ id: x.id, title: x.title, certNo: x.cert_no, issuedOn: x.issued_on })),
     }));
 
   return (

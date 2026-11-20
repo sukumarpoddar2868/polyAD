@@ -21,7 +21,7 @@ Forked 2026-11-20 from Shryxa Ads (`/home/sukumar/projects/Ads/shryxa_ads/web`, 
 
 ## Stack & conventions
 Same as Shryxa: Next.js 16 App Router + TS · Tailwind 4 · Zod 4 · supabase-js service-role only · custom bcrypt auth · Fernet token crypto · Groq · MapLibre + OpenFreeMap.
-- `pnpm dev` · verify `pnpm run lint && pnpm run build` · `pnpm run test:engine` (40) · after adding routes `npx next typegen` before `tsc`.
+- `pnpm dev` · verify `pnpm run lint && pnpm run build` · `pnpm run test:engine` (52) · after adding routes `npx next typegen` before `tsc`.
 - **Next 16 differs from training data** → `node_modules/next/dist/docs/`. Middleware = `src/proxy.ts`. `cacheComponents` ON (session reads inside `<Suspense>`). React 19 strict lint.
 - Env only via `lib/env.ts`. Types hand-written in `lib/supabase/types.ts` (key `polyad`, mirror migrations). Every query scoped by `user.id`; `requireUser()` in every page and server action. Design tokens in `globals.css`, never raw hex.
 - **Never change schema without the user's explicit approval**: write `supabase/migrations/000N_*.sql` → dry-run in a rolled-back txn via `psql "$DATABASE_URL"` → show SQL + ask → apply. `supabase/shryxa_reference/` = Shryxa's migrations, reference only.
@@ -36,10 +36,16 @@ Same as Shryxa: Next.js 16 App Router + TS · Tailwind 4 · Zod 4 · supabase-js
 
 2. ✅ Constituency targeting (2026-11-20): `src/features/constituencies/` — `data/up-ac.json` (403 seats, built by `pnpm run build:constituencies <DataMeet India_AC folder>`, CC BY 2.5 → credit DataMeet), `cover.ts` (hex circle covering, integer-km radius stops, ≤40 circles/seat; median 95% covered, ~22% spill), `/constituencies` map page, wizard Audience "Add an Assembly constituency" (pins tagged `seat`, grouped card, no drag markers). Pin limit 30 → 200 (Meta max). Wizard picker not yet clicked through (needs a connected candidate).
 
+3. ✅ Phase A — candidate profile + political mode (2026-11-20): migration `0002_candidate_profile.sql` **applied** (`clients.candidate_name/party/symbol/ac_no/paid_for_by/political_ready_at`; party null = Independent). `features/clients/political.ts` (`politicalGaps`, `UP_PARTIES`, ₹40L limit), profile form on `/clients/[id]`. Launch blocked until profile ready; every campaign sent as `ISSUES_ELECTIONS_POLITICS` + country IN, ads `authorization_category` POLITICAL (or `…_WITH_DIGITALLY_CREATED_MEDIA` via wizard checkbox). Wizard suggests the candidate's seat. Browser-tested profile save. Onboarding checklist (`onboardingSteps`) on candidate page: details → Page access (invite/BM) → ad account → Page political authorization (Facebook only, Meta has NO API for it or the disclaimer) → "Paid for by" text.
+
+4. ✅ Phase B — political AI copy (2026-11-20): `campaigns/ai/political.ts` (languages hi/hinglish/en, `ELECTION_RULES` prompt block, `guardrailHits` keyword check: religion/caste/inducement/attack/forces, Latin whole-word + Devanagari substring, candidate's own name/party/seat allowed). `politicalCopyPrompt` + `politicalAudience` (18–65+, any gender, no interests) in prompts.ts; `generatePoliticalCopy` rewrites up to 2× when flagged. Start step: candidate brief + language; no cities = candidate's whole seat (circles). Creative shows live check; launch blocks on hits unless `ad.copyReviewed`. Audience language default "All languages" (no locale filter — was English-only).
+
+5. ✅ Phase C — ECI compliance gate (2026-11-20): migration `0003_compliance.sql` **applied** (`mcmc_certificates`, `poll_schedule` PK (user_id, ac_no), `campaigns.mcmc_certificate_id`). `features/compliance/`: `silence.ts` (pure: 48 h window ending at poll close, IST; `checkSilence` → blocked / capAt / missing), certificates card on candidate page (scan JPG/PNG → `polyad-media` `u{user}/c{client}/mcmc/`; bucket rejects PDF), `/schedule` page (date per districts/seat ranges). Wizard Creative: certificate picker (`ad.mcmcCertificateId`, required for the tick). Launch: needs the candidate's own certificate; seats = `seatsTouched(pins)` + candidate seat; blocked inside a window; otherwise ad set `end_time` capped at the earliest window start (`RenderInput.endTime`); note lists seats without a poll date. Browser-tested certificate + schedule add/delete.
+
 ## Next up
 1. Add PolyAd redirect URI to the Meta app; connect a test candidate (Page + ad account); launch one seat with `validate_only` to confirm Meta accepts overlapping circles.
-2. Poll phase/date per seat (ECI schedule, when announced) for the silence-period gate.
-3. Candidate/party profile, political ad category + disclaimer, compliance gate (MCMC cert, silence period), Hindi AI copy with guardrails, spend per candidate.
+2. Enter the ECI poll dates on /schedule once announced. Later: warn on campaigns launched before their seats had a poll date (they aren't capped).
+3. D: spend per candidate vs ₹40L. E: trim WhatsApp/Pixel/Sales.
 
 ## Working agreements
 - Commit only when asked; never stage `.env*`. Trailer: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.

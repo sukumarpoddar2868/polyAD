@@ -6,6 +6,7 @@
 import { CTA_FOR, CURRENCY, type ConversionEvent, type Currency, type Destination } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
 import type { ReachScope } from "../ai/prompts.ts";
+import type { CopyLanguage } from "../ai/political.ts";
 import type { MediaRef } from "../media/rules";
 
 export type SectionId = "start" | "name-budget" | "audience" | "placements" | "creative" | "review";
@@ -218,6 +219,8 @@ export type Draft = {
     offer: string;
     cities: string[];
     scope: ReachScope;
+    /** Language the AI writes the ad text in. */
+    language: CopyLanguage;
   };
   /** True once the AI has filled the campaign; every field stays editable. */
   generated: boolean;
@@ -278,19 +281,25 @@ export type Draft = {
     /** AI card ideas from Start, used when switching to carousel. */
     cardIdeas: { headline: string; description: string }[];
     carousel: { cards: DraftCard[]; optimizeOrder: boolean; endCard: boolean };
+    /** Creative has AI-made / digitally altered realistic people or events (Meta disclosure). */
+    digitallyCreated: boolean;
+    /** The team checked text the election-rule check flagged, and it's fine. */
+    copyReviewed: boolean;
+    /** The MCMC pre-certification that covers this ad (ECI). Required to launch. */
+    mcmcCertificateId: number | null;
   };
 };
 
 export const initialDraft = (client: { id: number; name: string; pixelId?: string | null; pixelName?: string | null } | null): Draft => ({
   objective: null,
   clientId: client?.id ?? null,
-  setup: { businessName: client?.name ?? "", website: "", about: "", offer: "", cities: [], scope: "hyper-local" },
+  setup: { businessName: client?.name ?? "", website: "", about: "", offer: "", cities: [], scope: "hyper-local", language: "hi" },
   generated: false,
   launched: null,
   campaign: { name: "", budgetType: "daily", amount: String(CURRENCY.INR.defaultDailyBudget), currency: "INR", startDate: "", endDate: "", frequencyCap: 2 },
-  audience: { locations: [], ageMin: 18, ageMax: 65, gender: "any", language: "English", interests: [], mode: "strict", device: "all", why: "", type: "core", include: [], exclude: [] },
+  audience: { locations: [], ageMin: 18, ageMax: 65, gender: "any", language: "All languages", interests: [], mode: "strict", device: "all", why: "", type: "core", include: [], exclude: [] },
   placements: { mode: "advantage", facebook: true, instagram: true },
-  ad: { destination: "lead_form", url: "", phone: "", whatsappNumber: "", conversionEvent: "LEAD", whatsapp: { greeting: "", style: "prefill", prefill: "", questions: [], perItem: false }, pixel: client?.pixelId ? { id: client.pixelId, name: client.pixelName ?? `Pixel ${client.pixelId}` } : null, primaryText: "", headline: "", description: "", cta: "GET_QUOTE", format: "single", media: {}, leadForm: { name: "", privacyUrl: "", fields: ["FULL_NAME", "PHONE_NUMBER", "EMAIL"], questions: [], thankYou: "Thanks! We'll call you back shortly." }, cardIdeas: [], carousel: { cards: [], optimizeOrder: true, endCard: false } },
+  ad: { destination: "lead_form", url: "", phone: "", whatsappNumber: "", conversionEvent: "LEAD", whatsapp: { greeting: "", style: "prefill", prefill: "", questions: [], perItem: false }, pixel: client?.pixelId ? { id: client.pixelId, name: client.pixelName ?? `Pixel ${client.pixelId}` } : null, primaryText: "", headline: "", description: "", cta: "GET_QUOTE", format: "single", media: {}, leadForm: { name: "", privacyUrl: "", fields: ["FULL_NAME", "PHONE_NUMBER", "EMAIL"], questions: [], thankYou: "Thanks! We'll call you back shortly." }, cardIdeas: [], carousel: { cards: [], optimizeOrder: true, endCard: false }, digitallyCreated: false, copyReviewed: false, mcmcCertificateId: null },
 });
 
 /**
@@ -334,6 +343,7 @@ export function sectionComplete(id: SectionId, d: Draft): boolean {
     case "creative":
       return (
         d.ad.primaryText.trim() !== "" &&
+        d.ad.mcmcCertificateId !== null &&
         mediaReady(d) &&
         leadFormReady(d) &&
         (d.ad.format === "carousel"

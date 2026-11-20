@@ -41,6 +41,7 @@ export function CarouselEditor({ draft, update }: Pick<SectionProps, "draft" | "
         businessName: draft.setup.businessName,
         about: draft.setup.about,
         offer: draft.setup.offer,
+        language: draft.setup.language,
         destination: draft.ad.destination,
         objective: draft.objective ?? undefined,
         count: cards.length,

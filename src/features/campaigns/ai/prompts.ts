@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { CURRENCY, type Currency, type Destination } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
+import { ELECTION_RULES, LANGUAGE_INFO, candidateLines, type CandidateBrief, type CopyLanguage } from "./political.ts";
 
 /* ---------- Locations ---------- */
 
@@ -142,14 +143,37 @@ export function sanitizeCards(raw: unknown, max = 10): CardIdea[] {
 }
 
 /** Carousel cards on demand (Creative → "Write cards with AI"). */
-export function cardsPrompt(p: { businessName: string; about: string; offer: string; destination: Destination; objective?: string; count: number }): string {
+export function cardsPrompt(p: {
+  businessName: string;
+  about: string;
+  offer: string;
+  destination: Destination;
+  objective?: string;
+  count: number;
+  political?: { candidate: CandidateBrief; language: CopyLanguage };
+}): string {
+  const pol = p.political;
   return `Write ${p.count} carousel cards for a Meta (Facebook + Instagram) ad.
+${
+  pol
+    ? `
+This is a POLITICAL ad for an Indian election candidate.
+${candidateLines(pol.candidate)}
+About the candidate: ${p.about || "(not provided)"}
+What this ad says: ${p.offer || "(not provided)"}
+Goal: ${politicalGoal(p.destination)}
+Language: ${LANGUAGE_INFO[pol.language].brief}
 
+${ELECTION_RULES}
+Cards: each a different point — the candidate, a local issue from the brief, a plan from the brief, the vote appeal.
+`
+    : `
 Business: ${p.businessName || "(not provided)"}
 About: ${p.about || "(not provided)"}
 Offer: ${p.offer || "(not provided)"}
 Goal: ${goalGuide(p.destination, p.objective)}
-
+`
+}
 Each card is one swipeable panel with its own image. Make every card a DIFFERENT angle:
 a specific service or product, a benefit, a proof point (experience, reviews implied by the text),
 or the offer/price. Card 1 should hook; the last card should push the action.
@@ -291,6 +315,77 @@ OUTPUT RULES:
   "whatsapp_prefill": "...",
   "whatsapp_questions": ["..."]
 }`;
+}
+
+/* ---------- Political ad copy ---------- */
+
+/** What the reader should do next, for a candidate's campaign. */
+export function politicalGoal(destination: Destination): string {
+  switch (destination) {
+    case "lead_form":
+      return "SIGN-UPS — supporters and volunteers join the campaign via a short form inside Facebook/Instagram. Invite them to join the team; headline = the invitation.";
+    case "website":
+      return "VISITS to the campaign's web page — give a reason to read the candidate's plans; headline = what they will find.";
+    case "whatsapp":
+      return "CHATS on WhatsApp with the campaign team — invite voters to share their local issues or join updates; headline = why message.";
+    case "messenger":
+    case "instagram_dm":
+      return "CHATS with the campaign Page — invite voters to share their local issues; headline = why message.";
+    case "instagram_profile":
+      return "PROFILE VISITS — invite voters to follow the candidate for updates; headline = what they will see.";
+    case "call":
+      return "PHONE CALLS to the campaign office — invite voters to call with their issues; headline = why call.";
+    case "none":
+      return "AWARENESS — make voters remember the candidate, the party, the seat and the symbol, and ask for their vote; headline = name + the core promise from the brief.";
+  }
+}
+
+/** Political version of copyPrompt: same JSON keys; audience fields are fixed in code, not asked. */
+export function politicalCopyPrompt(p: {
+  candidate: CandidateBrief;
+  language: CopyLanguage;
+  about: string;
+  offer: string;
+  currency: Currency;
+  destination: Destination;
+  ctas: readonly CtaType[];
+  locationCount: number;
+}): string {
+  const [lo, hi] = BUDGET_RANGE[p.currency];
+  return `You are writing a POLITICAL Meta (Facebook + Instagram) ad for an Indian election candidate.
+
+${candidateLines(p.candidate)}
+
+Brief from the campaign team — the ONLY facts you may use:
+  About the candidate: ${p.about || "(not provided)"}
+  What this ad should say: ${p.offer || "(not provided)"}
+
+Goal: ${politicalGoal(p.destination)}
+Language: ${LANGUAGE_INFO[p.language].brief}
+
+${ELECTION_RULES}
+
+FIELDS:
+  • campaign_name: internal, English, MAXIMUM 40 characters, e.g. "Seat 174 — vote appeal Feb".
+  • daily_budget: whole number in ${p.currency} between ${lo} and ${hi}; higher for more areas (${p.locationCount} here).
+  • primary_text: 2–3 short sentences, MAXIMUM 400 characters, no line breaks. Mention the candidate's name; mention the party (and symbol if given) once. Don't write the seat number in voter text.
+  • headline: MAXIMUM 35 characters.
+  • description: MAXIMUM 100 characters, optional.
+  • call_to_action: exactly one of ${p.ctas.join(", ")}.
+  • lead_questions: ${p.destination === "lead_form" ? "1–2 short questions for volunteers (MAXIMUM 80 characters each), e.g. which ward/village they are from, how they can help. Never ask name, phone, email, city, religion or caste." : "[]"}
+  • thank_you_message: ${p.destination === "lead_form" ? "one sentence after sign-up saying the team will contact them (MAXIMUM 120 characters)." : "\"\""}
+  • whatsapp_greeting / whatsapp_prefill / whatsapp_questions: ${p.destination === "whatsapp" ? "greeting from the campaign team (MAXIMUM 200 characters); prefill = what the VOTER sends, first person (MAXIMUM 120 characters); 3 short tappable questions (MAXIMUM 60 characters each)." : "empty strings / empty list."}
+  • carousel_cards: 4 cards, each a different point; headline MAXIMUM 32 characters, description MAXIMUM 50 characters.
+  • interest_targeting: [] (political ads are not targeted by interests).
+  • age_min 18, age_max 65, gender "any", device_os "all", audience_why "".
+
+OUTPUT: one compact JSON object, no Markdown, no emojis, no line breaks inside strings:
+{"campaign_name":"...","daily_budget":${lo},"primary_text":"...","headline":"...","description":"...","call_to_action":"${p.ctas[0]}","interest_targeting":[],"age_min":18,"age_max":65,"gender":"any","device_os":"all","audience_why":"","carousel_cards":[{"headline":"...","description":"..."}],"lead_questions":[],"thank_you_message":"","whatsapp_greeting":"","whatsapp_prefill":"","whatsapp_questions":[]}`;
+}
+
+/** Audience fields are never left to the model for political ads: all adult voters, no interests. */
+export function politicalAudience(c: CopySuggestion): CopySuggestion {
+  return { ...c, interest_targeting: [], age_min: AGE_MIN, age_max: AGE_MAX, gender: "any", device_os: "all", audience_why: "All voters (18+) in the chosen areas — political ads aren't narrowed by interests." };
 }
 
 const squash = (s: unknown, max: number): string => {

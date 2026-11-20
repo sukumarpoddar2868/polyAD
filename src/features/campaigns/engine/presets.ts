@@ -64,6 +64,8 @@ export const CURRENCY_TO_COUNTRY: Record<Currency, string> = { USD: "United Stat
 
 /** Meta locale ids for targeting.locales. */
 export const LANGUAGE_TO_LOCALES: Record<string, number[]> = {
+  /** No locale filter — voters use Facebook in Hindi, English and more. */
+  "All languages": [],
   English: [6],
   Hindi: [46],
   Spanish: [23],

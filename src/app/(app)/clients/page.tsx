@@ -9,8 +9,9 @@ import { META_ERRORS } from "@/features/meta-connect/client-meta";
 import { requireUser } from "@/features/auth/dal";
 import { ensureSelfClient, listClients, type Client } from "@/features/clients/data";
 import { AddClientForm } from "@/features/clients/components/add-client-form";
+import { partyLabel } from "@/features/clients/political";
 
-export const metadata: Metadata = { title: "Clients" };
+export const metadata: Metadata = { title: "Candidates" };
 
 export default async function ClientsPage({ searchParams }: PageProps<"/clients">) {
   const sp = await searchParams;
@@ -27,10 +28,10 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-[13px] font-bold uppercase tracking-wide text-ink-muted">Workspace</p>
-          <h1 className="mt-1 text-[32px] font-extrabold leading-tight">clients</h1>
+          <h1 className="mt-1 text-[32px] font-extrabold leading-tight">candidates</h1>
         </div>
-        <Chip tone={atLimit ? "stopped" : "neutral"}>
-          {clients.length} / {user.clientLimit} clients on your plan
+        <Chip tone="neutral">
+          {clients.length} candidate{clients.length === 1 ? "" : "s"}
         </Chip>
       </header>
 
@@ -44,8 +45,8 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
               <Building2 className="size-5" aria-hidden /> Business Manager
             </h2>
             <p className="mt-1 text-[15px] text-ink-muted">
-              Already have partner access to your clients&apos; ad accounts? Connect your Business Manager once and import them
-              as clients — no invite links needed.
+              Already have partner access to the candidates&apos; ad accounts? Connect your Business Manager once and import
+              them — no invite links needed.
             </p>
           </div>
           <ButtonLink href="/api/meta/oauth/start?business=1" variant={businesses.length ? "secondary" : "primary"} prefetch={false}>
@@ -62,7 +63,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                 >
                   {b.meta_user_name}
                   <span className="text-[13px] font-normal text-ink-muted">
-                    {b.clientCount} client{b.clientCount === 1 ? "" : "s"}
+                    {b.clientCount} candidate{b.clientCount === 1 ? "" : "s"}
                   </span>
                   <Chip tone={b.connection_status === "connected" ? "active" : "stopped"}>
                     {b.connection_status === "connected" ? "Import →" : "Expired"}
@@ -75,13 +76,13 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-        <section aria-label="Your clients">
+        <section aria-label="Your candidates">
           {clients.length === 0 ? (
             <Card className="flex flex-col items-start gap-3 p-8">
-              <p className="text-[19px] font-extrabold">No clients yet</p>
+              <p className="text-[19px] font-extrabold">No candidates yet</p>
               <p className="max-w-md text-[15px] text-ink-muted">
-                Add your first client, then connect their Facebook yourself — or send them an invite link so they connect it
-                in a minute without an account.
+                Add your first candidate, then connect their Facebook Page and ad account yourself — or send their team an
+                invite link to connect it in a minute without an account.
               </p>
             </Card>
           ) : (
@@ -97,7 +98,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
 
         <Card className="h-fit">
           <h2 className="flex items-center gap-2 text-[19px] font-extrabold">
-            <Plus className="size-5" aria-hidden /> Add a client
+            <Plus className="size-5" aria-hidden /> Add a candidate
           </h2>
           <div className="mt-5">
             {atLimit ? (
@@ -127,7 +128,13 @@ function ClientCard({ client: c }: { client: Client }) {
       className="group flex h-full flex-col rounded-card bg-paper p-6 transition-shadow hover:shadow-[0_8px_30px_-12px_rgb(42_39_51/0.3)]"
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="text-[19px] font-extrabold leading-tight">{c.business_name ?? "Untitled client"}</p>
+        <div className="min-w-0">
+          <p className="text-[19px] font-extrabold leading-tight">{c.business_name ?? "Untitled candidate"}</p>
+          <p className="mt-0.5 text-[13px] text-ink-muted">
+            {partyLabel(c.party)}
+            {c.ac_no ? ` · seat ${c.ac_no}` : ""}
+          </p>
+        </div>
         <Chip tone={ready ? "active" : connected ? "paused" : "neutral"}>{ready ? "Ready" : connected ? "Setup needed" : "Not connected"}</Chip>
       </div>
       <dl className="mt-4 space-y-1 text-[14px] text-ink-muted">

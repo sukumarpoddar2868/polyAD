@@ -3,6 +3,11 @@
 import { z } from "zod";
 import { requireUser } from "@/features/auth/dal";
 import { getClient } from "@/features/clients/data";
+import { politicalGaps } from "@/features/clients/political";
+import { describeHits, guardrailHits } from "./ai/political.ts";
+import { getSeat, seatsTouched } from "@/features/constituencies/seats";
+import { getCertificate, scheduleFor } from "@/features/compliance/data";
+import { checkSilence, fmtIst, metaIst } from "@/features/compliance/silence";
 import { metaLinks } from "@/features/meta-connect/discovery";
 import { getConnectionToken } from "@/features/meta-connect/store";
 import { MetaApiError, graphGet } from "@/lib/meta/graph";
@@ -78,6 +83,12 @@ const LaunchPayload = z.object({
       .max(10),
     optimizeOrder: z.boolean(),
     endCard: z.boolean(),
+    /** AI-made or digitally altered realistic people/events → Meta's disclosure label. */
+    digitallyCreated: z.boolean().default(false),
+    /** The team reviewed text the election-rule check flagged. */
+    copyReviewed: z.boolean().default(false),
+    /** MCMC pre-certification covering this ad (ECI) — required. */
+    mcmcCertificateId: z.number().int().positive().nullable().default(null),
     leadForm: z
       .object({
         name: z.string().trim().max(60),
@@ -208,7 +219,42 @@ export async function launchDraftAction(
 
   const client = await getClient(user.id, p.clientId);
   if (!client) return fail("Client not found.");
-  if (!client.ad_account_id || !client.page_id) return fail("Pick this client's ad account and Facebook Page first.");
+  if (!client.ad_account_id || !client.page_id) return fail("Pick this candidate's ad account and Facebook Page first.");
+  // Every PolyAd campaign is a political ad: Meta needs the Page authorized + a "Paid for by" disclaimer.
+  const gaps = politicalGaps(client);
+  if (gaps.length) return fail(`Finish the candidate profile first: ${gaps.join(" ")}`);
+  // Election rules (RPA s.123 / MCC): flagged words need a human review before anything goes to Meta.
+  const hits = guardrailHits(
+    [p.ad.primaryText, p.ad.headline, p.ad.description, ...p.ad.cards.flatMap((c) => [c.headline, c.description]), ...(p.ad.leadForm?.questions ?? []), p.ad.leadForm?.thankYou, p.ad.whatsapp.greeting, p.ad.whatsapp.prefill, ...p.ad.whatsapp.questions],
+    [client.candidate_name, client.business_name, client.party, client.symbol, client.ac_no ? getSeat(client.ac_no)?.name : null],
+  );
+  if (hits.length && !p.ad.copyReviewed) {
+    return fail("The ad text may break election rules. Fix it, or tick “Reviewed” in Creative if it's fine.", describeHits(hits));
+  }
+  // ECI: every political ad needs an MCMC pre-certificate on file for this candidate.
+  const cert = p.ad.mcmcCertificateId ? await getCertificate(user.id, p.ad.mcmcCertificateId) : null;
+  if (!cert || cert.client_id !== client.id) {
+    return fail("Pick this ad's MCMC certificate in Creative. Add certificates on the candidate page first.");
+  }
+  // ECI silence period (RPA s.126): no ads in a seat in the 48 hours before its polling closes.
+  const seats = [...new Set([...seatsTouched(p.audience.pins), ...(client.ac_no ? [client.ac_no] : [])])];
+  const silence = checkSilence(seats, await scheduleFor(user.id, seats), {
+    now: new Date(),
+    start: p.campaign.startDate ? new Date(`${p.campaign.startDate}T00:00:00Z`) : null,
+    end: p.campaign.endDate ? new Date(`${p.campaign.endDate}T23:59:00Z`) : null,
+  });
+  if (silence.blocked.length) {
+    return fail(
+      "Election silence period: ads can't run in these seats until polling closes.",
+      silence.blocked.map((w) => `${w.acNo} ${getSeat(w.acNo)?.name ?? ""} — silent until ${fmtIst(w.close)} IST`),
+    );
+  }
+  const cap = silence.capAt;
+  const silenceNote = [
+    cap ? `Ends ${fmtIst(cap.start)} IST, before the silence period in seat ${cap.acNo} ${getSeat(cap.acNo)?.name ?? ""}.` : null,
+    silence.missing.length ? `No poll date entered for seat${silence.missing.length === 1 ? "" : "s"} ${silence.missing.slice(0, 10).join(", ")}${silence.missing.length > 10 ? "…" : ""} — add it on Poll schedule so PolyAd can stop ads in time.` : null,
+  ];
+
   const token = client.meta_connection_id ? await getConnectionToken(user.id, client.meta_connection_id) : null;
   if (!token) return fail("This client's Facebook connection is missing or expired. Reconnect it on the client page.");
   if ((p.ad.destination === "instagram_dm" || p.ad.destination === "instagram_profile") && !client.instagram_actor_id) {
@@ -301,6 +347,7 @@ export async function launchDraftAction(
     language: p.audience.language,
     startDate: p.campaign.startDate ?? null,
     endDate: p.campaign.endDate ?? null,
+    endTime: cap ? metaIst(cap.start) : null,
     launchStatus: status,
     advantageAudience: p.audience.advantage,
     deviceOs: p.audience.device,
@@ -309,6 +356,9 @@ export async function launchDraftAction(
     phoneNumber: p.ad.destination === "call" ? p.ad.phone.replace(/[^\d+]/g, "") : null,
     whatsappNumber: p.ad.destination === "whatsapp" && p.ad.whatsappNumber.trim() ? p.ad.whatsappNumber.replace(/[^\d+]/g, "") : null,
     pixel: websiteConversions ? { pixelId: client.pixel_id!, event: p.ad.conversionEvent } : null,
+    specialAdCategory: "ISSUES_ELECTIONS_POLITICS",
+    country: "India",
+    digitallyCreatedMedia: p.ad.digitallyCreated,
     frequencyCap: p.objective === "OUTCOME_AWARENESS" ? (p.campaign.frequencyCap ?? 2) : null,
     publisherPlatforms: p.placements.manual
       ? ([p.placements.facebook && "facebook", p.placements.instagram && "instagram"].filter(Boolean) as ("facebook" | "instagram")[])
@@ -345,6 +395,7 @@ export async function launchDraftAction(
         ad: { destination: perItem ? "whatsapp" : p.ad.destination, format: p.ad.format, headline: p.ad.headline, cta: p.ad.cta, carousel: { cards: p.ad.cards } },
       },
       ids,
+      { mcmcCertificateId: cert.id },
     ).catch(() => {});
     // Per-item WhatsApp links show the card pictures from Storage — keep those.
     if (!perItem) {
@@ -365,6 +416,6 @@ export async function launchDraftAction(
     steps,
     campaignId: ids.campaign,
     adsManagerUrl: mode === "live" ? metaLinks.adsManager(client.ad_account_id) : undefined,
-    note: [outcome.result.stoppedEarly, perItem ? "Per-item WhatsApp links run as a Traffic campaign (optimised for taps)." : null].filter(Boolean).join(" ") || undefined,
+    note: [outcome.result.stoppedEarly, perItem ? "Per-item WhatsApp links run as a Traffic campaign (optimised for taps)." : null, ...silenceNote].filter(Boolean).join(" ") || undefined,
   };
 }

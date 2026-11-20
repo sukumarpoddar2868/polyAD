@@ -55,6 +55,9 @@ export function toLaunchPayload(d: Draft): LaunchPayload | null {
           : [],
       optimizeOrder: d.ad.carousel.optimizeOrder,
       endCard: d.ad.carousel.endCard,
+      digitallyCreated: d.ad.digitallyCreated,
+      copyReviewed: d.ad.copyReviewed,
+      mcmcCertificateId: d.ad.mcmcCertificateId,
       leadForm:
         d.ad.destination === "lead_form"
           ? {

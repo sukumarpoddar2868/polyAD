@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/features/auth/dal";
 import { metaEnv } from "@/lib/env";
+import { db } from "@/lib/supabase/server";
 import { applyAssetSelection, type AssetFormState } from "@/features/meta-connect/assets";
 import {
   createInvite,
@@ -15,6 +16,7 @@ import {
   resolveInvite,
 } from "@/features/meta-connect/store";
 import { importClients, type ImportState } from "./import";
+import { INDEPENDENT } from "./political";
 import {
   ClientLimitError,
   createClientRecord,
@@ -26,7 +28,7 @@ import {
 /* ----------------------------------------------------------- Add client */
 
 const AddClientSchema = z.object({
-  businessName: z.string().trim().min(2, "Enter the business name.").max(120),
+  businessName: z.string().trim().min(2, "Enter the candidate's name.").max(120),
 });
 
 export type AddClientState = { error?: string; fieldErrors?: { businessName?: string }; values?: { businessName?: string } };
@@ -49,7 +51,7 @@ export async function addClientAction(_prev: AddClientState, form: FormData): Pr
     });
   } catch (e) {
     if (e instanceof ClientLimitError) return { error: `${e.message} Upgrade on the Account page to add more.`, values };
-    return { error: "Could not add the client. Please try again.", values };
+    return { error: "Could not add the candidate. Please try again.", values };
   }
   revalidatePath("/clients");
   redirect(`/clients/${id}`);
@@ -151,4 +153,45 @@ export async function removeBusinessAction(connectionId: number) {
   await removeBusinessConnection(user.id, connectionId);
   revalidatePath("/clients");
   redirect("/clients");
+}
+
+/* ------------------------------------------------ Candidate profile */
+
+const ProfileSchema = z.object({
+  candidateName: z.string().trim().min(2, "Enter the candidate's name.").max(120),
+  party: z.string().trim().max(120),
+  symbol: z.string().trim().max(80),
+  acNo: z.coerce.number().int().min(1, "Pick a constituency.").max(403),
+  paidForBy: z.string().trim().max(200),
+  politicalReady: z.literal("on").optional(),
+});
+
+export type ProfileState = { ok?: boolean; error?: string };
+
+export async function saveProfileAction(clientId: number, _prev: ProfileState, form: FormData): Promise<ProfileState> {
+  const { user, client } = await ownedClient(clientId);
+  const p = ProfileSchema.safeParse(Object.fromEntries(form));
+  if (!p.success) return { error: p.error.issues[0]?.message ?? "Check the form." };
+  const d = p.data;
+  if (d.politicalReady && !d.paidForBy) return { error: "Add the “Paid for by” text before confirming the Page is authorized." };
+  const party = d.party && d.party.toLowerCase() !== INDEPENDENT.toLowerCase() ? d.party : null;
+  const { error } = await db()
+    .from("clients")
+    .update({
+      candidate_name: d.candidateName,
+      party,
+      symbol: d.symbol || null,
+      ac_no: d.acNo,
+      paid_for_by: d.paidForBy || null,
+      // Keep the original confirmation time; clear it when unticked.
+      political_ready_at: d.politicalReady ? (client.political_ready_at ?? new Date().toISOString()) : null,
+      // The candidate's name is the client's display name.
+      business_name: d.candidateName,
+    })
+    .eq("id", client.id)
+    .eq("user_id", user.id);
+  if (error) return { error: "Could not save. Please try again." };
+  revalidatePath(`/clients/${clientId}`);
+  revalidatePath("/clients");
+  return { ok: true };
 }

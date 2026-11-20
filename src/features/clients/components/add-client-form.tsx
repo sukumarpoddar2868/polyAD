@@ -14,11 +14,11 @@ export function AddClientForm() {
   return (
     <form action={action} className="flex flex-col gap-4" noValidate>
       {state.error && <Callout tone="error">{state.error}</Callout>}
-      <Field id="businessName" label="Business name" error={state.fieldErrors?.businessName}>
+      <Field id="businessName" label="Candidate name" error={state.fieldErrors?.businessName}>
         <Input
           id="businessName"
           name="businessName"
-          placeholder="e.g. Bloom Café"
+          placeholder="e.g. Ramesh Kumar"
           required
           defaultValue={state.values?.businessName}
           aria-invalid={!!state.fieldErrors?.businessName}
@@ -26,7 +26,7 @@ export function AddClientForm() {
         />
       </Field>
       <Button type="submit" disabled={pending} className="self-start">
-        {pending ? "Adding…" : "Add client"}
+        {pending ? "Adding…" : "Add candidate"}
       </Button>
     </form>
   );

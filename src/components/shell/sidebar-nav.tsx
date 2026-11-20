@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, MapPinned, Megaphone, Users, UserRound, Store, Inbox, ShieldCheck } from "lucide-react";
+import { LayoutGrid, MapPinned, Megaphone, Users, UserRound, Store, Inbox, ShieldCheck, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type AccountType = "business" | "agency";
@@ -18,6 +18,7 @@ export function NavLinks({ accountType = "agency", isAdmin = false, path = "" }:
     { href: "/dashboard", label: "Dashboard", icon: LayoutGrid },
     { href: "/campaigns", label: "Campaigns", icon: Megaphone },
     { href: "/constituencies", label: "Constituencies", icon: MapPinned },
+    { href: "/schedule", label: "Poll schedule", icon: CalendarClock },
     { href: "/leads", label: "Sign-ups", icon: Inbox },
     { href: "/clients", label: accountType === "business" ? "My business" : "Candidates", icon: accountType === "business" ? Store : Users },
     { href: "/account", label: "Account", icon: UserRound },

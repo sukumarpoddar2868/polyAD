@@ -9,6 +9,7 @@ import { Callout } from "@/components/ui/surface";
 import { CURRENCIES, CURRENCY } from "../engine/presets.ts";
 import { generateSetupAction } from "../ai/actions";
 import { REACH_SCOPES, SCOPE_INFO } from "../ai/prompts.ts";
+import { COPY_LANGUAGES, LANGUAGE_INFO, describeHits } from "../ai/political.ts";
 import { OBJECTIVE_OPTIONS, defaultCta, defaultDestination, destinationOptions, type ObjectiveId } from "./blueprint";
 import { DestinationDetails } from "./destination-details";
 import type { SectionProps } from "./create-campaign";
@@ -28,6 +29,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [flags, setFlags] = useState<string[]>([]);
   const fe = (k: string) => fieldErrors[k];
 
   const chooseObjective = (id: ObjectiveId | "") =>
@@ -49,6 +51,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
     setError(null);
     setFieldErrors({});
     setNotice(null);
+    setFlags([]);
     const objectiveId = draft.objective;
     start(async () => {
       const r = await generateSetupAction({
@@ -61,6 +64,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
         offer: s.offer,
         cities: s.cities,
         scope: s.scope,
+        language: s.language,
         currency: draft.campaign.currency,
       });
       if (!r.ok) {
@@ -69,13 +73,16 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
         return;
       }
       const c = r.copy;
+      const seatTag = r.seat ? { no: r.seat.no, name: r.seat.name, coverage: r.seat.coverage } : null;
+      const pins = [...(r.seat?.pins ?? []), ...r.pins];
+      setFlags(describeHits(r.flags));
       update((d) => ({
         ...d,
         generated: true,
         campaign: { ...d.campaign, name: c.campaign_name, amount: String(c.daily_budget), budgetType: "daily" },
         audience: {
           ...d.audience,
-          locations: r.pins.map((p) => ({ name: p.name, lat: p.lat, lng: p.lng, radiusKm: p.radius_km, why: p.why, geo: p.geo })),
+          locations: pins.map((p, i) => ({ name: p.name, lat: p.lat, lng: p.lng, radiusKm: p.radius_km, why: p.why, geo: p.geo, seat: seatTag && i < (r.seat?.pins.length ?? 0) ? seatTag : null })),
           ageMin: c.age_min,
           ageMax: c.age_max,
           gender: c.gender,
@@ -94,6 +101,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
           description: c.description ?? "",
           cta: c.call_to_action,
           cardIdeas: c.carousel_cards,
+          copyReviewed: false,
           whatsapp: {
             ...d.ad.whatsapp,
             greeting: c.whatsapp_greeting || d.ad.whatsapp.greeting,
@@ -102,7 +110,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
           },
           leadForm: {
             ...d.ad.leadForm,
-            name: d.ad.leadForm.name || `${s.businessName} enquiry`.slice(0, 60),
+            name: d.ad.leadForm.name || `${s.businessName} volunteers`.slice(0, 60),
             questions: c.lead_questions,
             thankYou: c.thank_you_message || d.ad.leadForm.thankYou,
           },
@@ -117,8 +125,8 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
       }));
       setNotice(
         r.usedFallback
-          ? "The AI was busy, so we drafted simple copy from your description. Everything else is filled — review and edit."
-          : `Done — ${r.pins.length} area${r.pins.length === 1 ? "" : "s"}, budget, audience and ad text are filled in. Review each step and edit anything.${r.notes.length ? ` Note: ${r.notes.join(" ")}` : ""}`,
+          ? "The AI was busy, so we drafted simple text from your brief. Everything else is filled — review and edit."
+          : `Done — ${r.seat ? `seat ${r.seat.no} · ${r.seat.name} (${r.seat.pins.length} circles)` : `${r.pins.length} area${r.pins.length === 1 ? "" : "s"}`}, budget and ad text are filled in. Review each step and edit anything.${r.notes.length ? ` Note: ${r.notes.join(" ")}` : ""}`,
       );
     });
   };
@@ -127,8 +135,8 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
     <>
       <Header
         level="Start"
-        title="What do you want, and from whom?"
-        blurb="Pick your goal, describe the business, and AI fills in the whole campaign — name, budget, areas, audience and ad text. You can edit every field after."
+        title="What should voters hear?"
+        blurb="Pick the goal, give the AI a short brief, and it fills the campaign — name, budget, the candidate's seat and the ad text in Hindi or English, within election rules. You can edit every field after."
       />
       <div className="flex flex-col gap-6">
         {/* 1. Goal → destination: first, so the AI writes for it */}
@@ -167,8 +175,8 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
           {draft.objective && <DestinationDetails draft={draft} update={update} client={client} websiteError={fe("website")} />}
         </Group>
 
-        {/* 2. About the business */}
-        <Group title="About the business">
+        {/* 2. Candidate + brief */}
+        <Group title="Candidate and message">
           {clients.length === 0 ? (
             <Callout>
               No client is connected to Facebook yet.{" "}
@@ -178,7 +186,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
             </Callout>
           ) : (
             isAgency && (
-              <Field id="client" label="Client">
+              <Field id="client" label="Candidate">
                 <Select
                   id="client"
                   value={draft.clientId ?? ""}
@@ -192,7 +200,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
                     }));
                   }}
                 >
-                  <option value="">Choose a client…</option>
+                  <option value="">Choose a candidate…</option>
                   {clients.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -217,42 +225,64 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
               ))}
             </dl>
           )}
+          {client && client.politicalGaps.length > 0 && (
+            <Callout tone="error">
+              Political ads can&apos;t launch until the candidate profile is done: {client.politicalGaps.join(" ")}{" "}
+              <Link href={`/clients/${client.id}`} className="font-bold underline">
+                Open profile →
+              </Link>
+            </Callout>
+          )}
           {client && !client.ready && (
             <Callout tone="error">
-              This client needs an ad account and Page before launch.{" "}
+              This candidate needs an ad account and Page before launch.{" "}
               <Link href={`/clients/${client.id}`} className="font-bold underline">
                 Finish setup →
               </Link>
             </Callout>
           )}
-          <Field id="businessName" label="Business name" error={fe("businessName")}>
+          <Field id="businessName" label="Candidate name" error={fe("businessName")} hint="Party, symbol and seat come from the candidate profile.">
             <Input id="businessName" value={s.businessName} aria-invalid={!!fe("businessName")} onChange={(e) => set(update, "setup", { businessName: e.target.value })} />
           </Field>
-          <Field id="about" label="What does the business do?" error={fe("about")} hint="Services, who the customers are, what makes it different.">
+          <Field id="about" label="About the candidate" error={fe("about")} hint="Only true, checkable facts — the AI uses nothing else.">
             <TextArea
               id="about"
               max={2000}
               rows={4}
               value={s.about}
               onChange={(v) => set(update, "setup", { about: v })}
-              placeholder="e.g. Bangalore CA firm with 15 years' experience. ITR filing, GST and tax planning for salaried people and small businesses."
+              placeholder="e.g. Two-time MLA from this seat. Built the new district hospital wing (2023) and 40 km of village roads. Local, born in Aminabad."
             />
           </Field>
-          <Field id="offer" label="What does this campaign promote?" error={fe("offer")} hint="The specific offer, price or deadline.">
+          <Field id="offer" label="What should this ad say?" error={fe("offer")} hint="The one message: a plan, an issue, an event, or the vote appeal.">
             <TextArea
               id="offer"
               max={2000}
               rows={3}
               value={s.offer}
               onChange={(v) => set(update, "setup", { offer: v })}
-              placeholder="e.g. ITR filing for FY 2025-26 from ₹999. Deadline 31 July — avoid the ₹5,000 late fee."
+              placeholder="e.g. Ask for the vote: clean water in every ward and a degree college for the seat, as in the party manifesto."
             />
           </Field>
         </Group>
 
-        {/* 3. Customers */}
-        <Group title="Where are your customers?">
-          <Field id="cities" label="Target cities" error={fe("cities")}>
+        {/* 3. Voters */}
+        <Group title="Language and voters">
+          <div className="flex flex-col gap-2">
+            <span className="text-[13px] font-bold">Ad text language</span>
+            <Segmented
+              label="Ad text language"
+              value={s.language}
+              onChange={(v) => set(update, "setup", { language: v })}
+              options={COPY_LANGUAGES.map((x) => ({ value: x, label: LANGUAGE_INFO[x].label }))}
+            />
+          </div>
+          <Field
+            id="cities"
+            label="Target cities (optional)"
+            error={fe("cities")}
+            hint={client?.seat ? `Leave empty to target the candidate's whole seat: ${client.seat.no} · ${client.seat.name}.` : "Or set the candidate's constituency on their profile."}
+          >
             <ChipInput id="cities" values={s.cities} onChange={(v) => set(update, "setup", { cities: v })} placeholder="e.g. Bangalore" />
           </Field>
           <div className="flex flex-col gap-2">
@@ -280,7 +310,7 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
         <div className="flex flex-col gap-3 rounded-card bg-lavender-soft p-5">
           <p className="text-[14px] text-ink-muted">
             {!client ? (
-              "Choose a client first."
+              "Choose a candidate first."
             ) : !objective ? (
               "Choose a campaign goal first."
             ) : (
@@ -292,6 +322,11 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
           </p>
           {error && <Callout tone="error">{error}</Callout>}
           {notice && <Callout tone="success">{notice}</Callout>}
+          {flags.length > 0 && (
+            <Callout tone="error">
+              The AI text still has words that may break election rules — fix them in Creative: {flags.join(" · ")}
+            </Callout>
+          )}
           <div className="flex flex-wrap gap-3">
             <Button type="button" onClick={generate} disabled={pending || !objective || !client} aria-busy={pending}>
               <Sparkles className="size-4" aria-hidden />

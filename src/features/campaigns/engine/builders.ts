@@ -190,6 +190,7 @@ export function buildAdSet(spec: CampaignSpec): Operation {
 
 export function buildAd(spec: CampaignSpec): Operation {
   const a = spec.ad;
+  const auth: JsonObject = a.authorization_category && a.authorization_category !== "NONE" ? { authorization_category: a.authorization_category } : {};
   const oss = a.creative.object_story_spec;
 
   if (oss.video_data) {
@@ -219,6 +220,7 @@ export function buildAd(spec: CampaignSpec): Operation {
         adset_id: AD_SET_REF,
         status: spec.campaign.status,
         creative: strip({ name: a.creative.name, object_story_spec: objectStorySpec, url_tags: a.creative.url_tags }),
+        ...auth,
       },
     };
   }
@@ -264,7 +266,7 @@ export function buildAd(spec: CampaignSpec): Operation {
     resourceType: "ad",
     refKey: "ad",
     endpoint: `act_${spec.ad_account_id}/ads`,
-    payload: { name: a.name, adset_id: AD_SET_REF, status: spec.campaign.status, creative },
+    payload: { name: a.name, adset_id: AD_SET_REF, status: spec.campaign.status, creative, ...auth },
   };
 }
 

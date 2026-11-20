@@ -43,6 +43,13 @@ export type ClientRow = {
   pixel_id: string | null;
   pixel_name: string | null;
   assets_updated_at: string | null;
+  candidate_name: string | null;
+  /** Empty = Independent. */
+  party: string | null;
+  symbol: string | null;
+  ac_no: number | null;
+  paid_for_by: string | null;
+  political_ready_at: string | null;
 };
 
 export type MetaConnectionRow = {
@@ -120,6 +127,29 @@ export type CampaignRow = {
   created_at: string;
   updated_at: string;
   launched_at: string | null;
+  mcmc_certificate_id: number | null;
+};
+
+export type McmcCertificateRow = {
+  id: number;
+  user_id: number;
+  client_id: number;
+  cert_no: string;
+  committee: string;
+  issued_on: string;
+  title: string;
+  file_path: string | null;
+  created_at: string;
+};
+
+export type PollScheduleRow = {
+  user_id: number;
+  ac_no: number;
+  phase: number | null;
+  poll_date: string;
+  /** "HH:MM:SS", IST. */
+  poll_end: string;
+  updated_at: string;
 };
 
 export type Database = {
@@ -133,6 +163,8 @@ export type Database = {
       meta_oauth_pending: Row<MetaOAuthPendingRow>;
       client_invites: Row<ClientInviteRow>;
       campaigns: Row<CampaignRow>;
+      mcmc_certificates: Row<McmcCertificateRow>;
+      poll_schedule: Row<PollScheduleRow>;
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

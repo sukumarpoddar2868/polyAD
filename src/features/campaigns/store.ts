@@ -128,6 +128,7 @@ export async function recordLaunch(
   draftId: number | null,
   draft: Json,
   ids: { campaign?: string; ad_set?: string; ad?: string; lead_form?: string },
+  extra: { mcmcCertificateId?: number | null } = {},
 ): Promise<void> {
   const d = (draft ?? {}) as DraftShape;
   const clientId = Number(d.clientId);
@@ -140,6 +141,7 @@ export async function recordLaunch(
     meta_adset_id: ids.ad_set ?? null,
     meta_ad_id: ids.ad ?? null,
     meta_form_id: ids.lead_form ?? null,
+    mcmc_certificate_id: extra.mcmcCertificateId ?? null,
     draft: null,
     launched_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),

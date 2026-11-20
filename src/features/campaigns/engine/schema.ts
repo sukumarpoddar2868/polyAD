@@ -267,7 +267,13 @@ export const AdCreativeInput = z.object({
   url_tags: z.string().nullish(),
 });
 
-export const AdInput = z.object({ name: z.string(), creative: AdCreativeInput });
+export const AUTHORIZATION_CATEGORIES = ["NONE", "POLITICAL", "POLITICAL_WITH_DIGITALLY_CREATED_MEDIA"] as const;
+export const AdInput = z.object({
+  name: z.string(),
+  creative: AdCreativeInput,
+  /** Political ads must be labelled on the ad; the …DIGITALLY_CREATED_MEDIA variant discloses AI/altered realistic media. */
+  authorization_category: z.enum(AUTHORIZATION_CATEGORIES).nullish(),
+});
 
 /* ---------- Lead form (destination ON_AD) ---------- */
 

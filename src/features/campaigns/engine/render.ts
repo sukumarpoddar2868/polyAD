@@ -58,9 +58,13 @@ export type RenderInput = {
   bidStrategy?: string;
   objective?: string | null;
   specialAdCategory?: string;
+  /** Political ads only: the creative has AI-made or digitally altered realistic people/events. */
+  digitallyCreatedMedia?: boolean;
   /** YYYY-MM-DD */
   startDate?: string | null;
   endDate?: string | null;
+  /** Exact end time (ISO with offset); wins over endDate. Used to stop before an election silence period. */
+  endTime?: string | null;
   launchStatus?: "PAUSED" | "ACTIVE";
   /** Phone OS targeting. Not "all" ⇒ mobile only, manual placements. */
   deviceOs?: "all" | "android" | "ios";
@@ -190,6 +194,7 @@ export function renderSpec(input: RenderInput): CampaignSpecInput {
   const stamp = input.stamp ?? nameStamp(new Date());
   const country = input.country || CURRENCY_TO_COUNTRY[currency];
   const countryIso = COUNTRY_TO_ISO[country] ?? "US";
+  const political = input.specialAdCategory === "ISSUES_ELECTIONS_POLITICS";
   const locales = LANGUAGE_TO_LOCALES[input.language ?? "English"] ?? [];
 
   const dest = input.destination;
@@ -251,7 +256,7 @@ export function renderSpec(input: RenderInput): CampaignSpecInput {
       age_min: Math.trunc(adCopy.age_min ?? 18),
       age_max: Math.trunc(adCopy.age_max ?? 65),
       genders,
-      locales,
+      ...(locales.length ? { locales } : {}),
       flexible_spec: flexibleSpec,
       // Instagram-profile ads only run on Instagram.
       publisher_platforms: dest === "instagram_profile" ? ["instagram"] : input.publisherPlatforms?.length ? input.publisherPlatforms : ["facebook", "instagram"],
@@ -281,7 +286,8 @@ export function renderSpec(input: RenderInput): CampaignSpecInput {
     adSet.frequency_control_specs = [{ event: "IMPRESSIONS", interval_days: 7, max_frequency: Math.trunc(input.frequencyCap) }];
   }
   if (input.startDate) adSet.start_time = `${input.startDate}T00:00:00+0000`;
-  if (input.endDate) adSet.end_time = `${input.endDate}T23:59:00+0000`;
+  if (input.endTime) adSet.end_time = input.endTime;
+  else if (input.endDate) adSet.end_time = `${input.endDate}T23:59:00+0000`;
 
   const linkData: JsonObject = {
     image_hash: input.imageHash || "REPLACE_WITH_UPLOADED_HASH",
@@ -321,11 +327,13 @@ export function renderSpec(input: RenderInput): CampaignSpecInput {
       objective,
       status: input.launchStatus ?? "PAUSED",
       special_ad_categories: [input.specialAdCategory ?? "NONE"],
+      ...(political ? { special_ad_category_country: [countryIso] } : {}),
       buying_type: "AUCTION",
       spend_cap: lifetime ? dailyMinor : dailyMinor * CURRENCY[currency].defaultSpendCapMultiplier,
     },
     ad_set: adSet,
     ad: {
+      ...(political ? { authorization_category: input.digitallyCreatedMedia ? "POLITICAL_WITH_DIGITALLY_CREATED_MEDIA" : "POLITICAL" } : {}),
       name: `${custom || name} — ${input.video ? "video" : input.carousel?.cards.length ? "carousel" : "single image"} ${stamp}`,
       creative: {
         name: `${custom || name} creative ${stamp}`,

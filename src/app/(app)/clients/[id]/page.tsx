@@ -15,8 +15,15 @@ import { TestTokenForm } from "@/features/clients/components/test-token-form";
 import { ReadinessList } from "@/features/clients/components/readiness";
 import { loadClientMeta, META_ERRORS } from "@/features/meta-connect/client-meta";
 import { metaConfigured } from "@/lib/env";
+import { ProfileForm } from "@/features/clients/components/profile-form";
+import { onboardingSteps, partyLabel, politicalGaps } from "@/features/clients/political";
+import { getSeat, seatSummaries } from "@/features/constituencies/seats";
+import { listCertificates } from "@/features/compliance/data";
+import { Certificates, type CertView } from "@/features/compliance/components/certificates";
+import { MEDIA_BUCKET } from "@/features/campaigns/media/rules";
+import { db } from "@/lib/supabase/server";
 
-export const metadata: Metadata = { title: "Client" };
+export const metadata: Metadata = { title: "Candidate" };
 
 const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : null;
@@ -28,9 +35,10 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
   if (!client) notFound();
 
   const isAgency = user.accountType === "agency";
-  const [meta, businesses] = await Promise.all([
+  const [meta, businesses, certs] = await Promise.all([
     metaConfigured() ? loadClientMeta(user.id, client) : Promise.resolve(null),
     isAgency ? listBusinessConnections(user.id) : Promise.resolve([]),
+    client.is_self ? Promise.resolve([]) : certificateViews(user.id, client.id),
   ]);
   const liveBusinesses = businesses.filter((b) => b.connection_status === "connected");
   const conn = meta?.connection ?? null;
@@ -38,18 +46,22 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
   const startUrl = `/api/meta/oauth/start?client=${client.id}`;
   const errKey = typeof sp.meta_error === "string" ? sp.meta_error : null;
   const justConnected = sp.connected === "1";
+  const seat = client.ac_no ? getSeat(client.ac_no) : null;
+  const gaps = politicalGaps(client);
+  const seats = seatSummaries().map(({ no, name, reserved, district }) => ({ no, name, reserved, district }));
 
   return (
     <div className="flex flex-col gap-6">
       {isAgency && (
         <Link href="/clients" className="flex w-fit items-center gap-1.5 text-[14px] font-bold text-ink-muted hover:text-ink">
-          <ArrowLeft className="size-4" aria-hidden /> All clients
+          <ArrowLeft className="size-4" aria-hidden /> All candidates
         </Link>
       )}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-[13px] font-bold uppercase tracking-wide text-ink-muted">{client.is_self ? "Your business" : "Client"}</p>
+          <p className="text-[13px] font-bold uppercase tracking-wide text-ink-muted">{client.is_self ? "Your business" : partyLabel(client.party)}</p>
           <h1 className="mt-1 text-[32px] font-extrabold leading-tight">{client.business_name}</h1>
+          {seat && <p className="mt-1 text-[15px] text-ink-muted">{seat.no} · {seat.name} · {seat.district}</p>}
         </div>
         <Chip tone={connected ? "active" : conn ? "stopped" : "paused"}>
           {connected ? "Facebook connected" : conn ? "Connection expired" : "Not connected"}
@@ -60,6 +72,43 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
       {errKey && <Callout tone="error">{META_ERRORS[errKey] ?? "Something went wrong with Facebook login."}</Callout>}
       {justConnected && connected && <Callout tone="success">Facebook connected. Now pick the ad account and Page below.</Callout>}
       {meta?.error && <Callout tone="error">{meta.error}</Callout>}
+
+      {/* ------------------------------------------------ Onboarding */}
+      {!client.is_self && (
+        <Card>
+          <h2 className="mb-4 text-[19px] font-extrabold">Onboarding</h2>
+          <ReadinessList items={onboardingSteps(client, connected)} />
+        </Card>
+      )}
+
+      {/* ------------------------------------------- Candidate profile */}
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[19px] font-extrabold">Candidate profile</h2>
+          <Chip tone={gaps.length ? "paused" : "active"}>{gaps.length ? "Not ready for political ads" : "Ready for political ads"}</Chip>
+        </div>
+        {gaps.length > 0 && (
+          <ul className="list-disc pl-5 text-[14px] text-ink-muted">
+            {gaps.map((g) => (
+              <li key={g}>{g}</li>
+            ))}
+          </ul>
+        )}
+        <ProfileForm client={client} seats={seats} />
+      </Card>
+
+      {/* --------------------------------------------- MCMC certificates */}
+      {!client.is_self && (
+        <Card className="flex flex-col gap-4">
+          <div>
+            <h2 className="text-[19px] font-extrabold">MCMC certificates</h2>
+            <p className="mt-1 text-[14px] text-ink-muted">
+              Each ad must be pre-certified by the Media Certification &amp; Monitoring Committee before it runs. Add the certificate here; you pick it when creating the ad.
+            </p>
+          </div>
+          <Certificates clientId={client.id} certs={certs} />
+        </Card>
+      )}
 
       {/* ------------------------------------------------ Connection */}
       <Card>
@@ -191,6 +240,30 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
       )}
     </div>
   );
+}
+
+/** Certificates with a 1-hour link to the scan and how many campaigns used each. */
+async function certificateViews(userId: number, clientId: number): Promise<CertView[]> {
+  const rows = await listCertificates(userId, clientId);
+  const paths = rows.map((r) => r.file_path).filter((x): x is string => Boolean(x));
+  const [signed, used] = await Promise.all([
+    paths.length ? db().storage.from(MEDIA_BUCKET).createSignedUrls(paths, 3600) : Promise.resolve({ data: [] }),
+    rows.length
+      ? db().from("campaigns").select("mcmc_certificate_id").eq("user_id", userId).in("mcmc_certificate_id", rows.map((r) => r.id))
+      : Promise.resolve({ data: [] }),
+  ]);
+  const urls = new Map((signed.data ?? []).map((u) => [u.path, u.signedUrl]));
+  const counts = new Map<number, number>();
+  for (const c of used.data ?? []) if (c.mcmc_certificate_id) counts.set(c.mcmc_certificate_id, (counts.get(c.mcmc_certificate_id) ?? 0) + 1);
+  return rows.map((r) => ({
+    id: r.id,
+    certNo: r.cert_no,
+    committee: r.committee,
+    issuedOn: r.issued_on,
+    title: r.title,
+    fileUrl: r.file_path ? (urls.get(r.file_path) ?? null) : null,
+    used: counts.get(r.id) ?? 0,
+  }));
 }
 
 function money(v: number | null, currency: string) {

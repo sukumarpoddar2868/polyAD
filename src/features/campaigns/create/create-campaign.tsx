@@ -26,6 +26,15 @@ export type ClientOption = {
   pixelId: string | null;
   pixelName: string | null;
   hasInstagram: boolean;
+  /** Candidate profile: what still blocks political ads (empty = ready). */
+  politicalGaps: string[];
+  paidForBy: string | null;
+  /** The seat the candidate contests, offered first in Audience. */
+  seat: { no: number; name: string } | null;
+  /** Candidate's own name/party/symbol/seat — never flagged by the election-rule check. */
+  allowTerms: string[];
+  /** MCMC certificates on file for this candidate, newest first. */
+  certificates: { id: number; title: string; certNo: string; issuedOn: string }[];
 };
 
 export type SectionProps = {
