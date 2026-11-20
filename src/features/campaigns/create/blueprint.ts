@@ -3,7 +3,7 @@
  * state the page holds. Each module is built out deeply later; `planned`
  * lists what each one will grow into.
  */
-import { CTA_FOR, CURRENCY, type ConversionEvent, type Currency, type Destination } from "../engine/presets.ts";
+import { CTA_FOR, CURRENCY, POLYAD_DESTINATIONS, POLYAD_OBJECTIVES, type Currency } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
 import type { ReachScope } from "../ai/prompts.ts";
 import type { CopyLanguage } from "../ai/political.ts";
@@ -24,7 +24,10 @@ export const LEVELS: Level[] = [
 
 export const SECTION_ORDER: SectionId[] = LEVELS.flatMap((l) => l.sections.map((s) => s.id));
 
-export type ObjectiveId = "OUTCOME_TRAFFIC" | "OUTCOME_LEADS" | "OUTCOME_AWARENESS" | "OUTCOME_ENGAGEMENT" | "OUTCOME_SALES";
+export type ObjectiveId = (typeof POLYAD_OBJECTIVES)[number];
+
+/** Where people go after tapping. The engine also knows WhatsApp; PolyAd doesn't offer it. */
+export type Destination = (typeof POLYAD_DESTINATIONS)[number];
 
 export const OBJECTIVE_OPTIONS: {
   id: ObjectiveId;
@@ -33,26 +36,15 @@ export const OBJECTIVE_OPTIONS: {
   available: boolean;
   note?: string;
 }[] = [
-  { id: "OUTCOME_LEADS", label: "Leads", blurb: "Collect enquiries — instant form, WhatsApp chats or phone calls.", available: true },
-  { id: "OUTCOME_TRAFFIC", label: "Traffic", blurb: "Send people to your website or landing page.", available: true },
-  { id: "OUTCOME_AWARENESS", label: "Awareness", blurb: "Show your ad to as many nearby people as possible — great for openings and new shops.", available: true },
-  { id: "OUTCOME_ENGAGEMENT", label: "Engagement", blurb: "Get people messaging you on WhatsApp, Messenger or Instagram.", available: true },
-  { id: "OUTCOME_SALES", label: "Sales", blurb: "Find people likely to buy on your website. Needs a Meta Pixel.", available: true },
+  { id: "OUTCOME_AWARENESS", label: "Awareness", blurb: "Show the candidate's message to as many voters in the seat as possible.", available: true },
+  { id: "OUTCOME_LEADS", label: "Sign-ups", blurb: "Collect volunteer or supporter sign-ups with an instant form, or get phone calls.", available: true },
+  { id: "OUTCOME_ENGAGEMENT", label: "Engagement", blurb: "Get voters messaging the candidate on Messenger or Instagram.", available: true },
+  { id: "OUTCOME_TRAFFIC", label: "Traffic", blurb: "Send people to the candidate's website or manifesto page.", available: true },
 ];
 
 export type AdFormat = "single" | "carousel" | "video";
 /** One carousel card (1:1 image). */
-export type DraftCard = { id: string; headline: string; description: string; link: string; image?: MediaRef; /** Per-item WhatsApp message ("" = default template). */ waMessage?: string };
-
-/** WhatsApp setup: greeting + what the customer sends; per-item links for carousels. */
-export type DraftWhatsApp = {
-  greeting: string;
-  style: "prefill" | "questions";
-  prefill: string;
-  questions: string[];
-  /** Carousel only: each card opens WhatsApp with its own message + item picture (runs as Traffic). */
-  perItem: boolean;
-};
+export type DraftCard = { id: string; headline: string; description: string; link: string; image?: MediaRef };
 
 /** Uploaded media for single-image (feed/portrait/story) and video ads. */
 export type DraftMedia = { feed?: MediaRef; portrait?: MediaRef; story?: MediaRef; video?: MediaRef };
@@ -91,22 +83,13 @@ export function leadFormReady(d: Draft): boolean {
   return isHttpsUrl(f.privacyUrl) && f.fields.length > 0 && f.questions.every((q) => q.trim().length > 0 && q.length <= 80);
 }
 
-/** Website goals that count conversions with the Pixel (Sales, website leads). */
-export const websiteConversions = (d: Draft) => d.ad.destination === "website" && (d.objective === "OUTCOME_SALES" || d.objective === "OUTCOME_LEADS");
-
 /** Destination-specific details are filled in. */
 export function destinationReady(d: Draft): boolean {
   switch (d.ad.destination) {
     case "website":
-      return isHttpsUrl(d.ad.url) && (!websiteConversions(d) || Boolean(d.ad.pixel));
+      return isHttpsUrl(d.ad.url);
     case "call":
       return isPhone(d.ad.phone);
-    case "whatsapp": {
-      const w = d.ad.whatsapp;
-      const textOk = w.style === "prefill" ? w.prefill.trim().length > 0 : w.questions.some((q) => q.trim());
-      if (w.perItem && d.ad.format === "carousel") return isPhone(d.ad.whatsappNumber);
-      return isPhone(d.ad.whatsappNumber) && w.greeting.trim().length > 0 && textOk;
-    }
     default:
       return true;
   }
@@ -150,20 +133,17 @@ export const payloadPins = (pins: DraftPin[]) =>
 export type DestinationOption = { id: Destination; label: string; blurb: string; available: boolean; note?: string };
 
 /** What the client has connected — some destinations need it. */
-type ClientCaps = { hasPixel?: boolean; hasInstagram?: boolean } | undefined;
+type ClientCaps = { hasInstagram?: boolean } | undefined;
 
 /** Destinations per objective, with availability for this client. */
 export function destinationOptions(objective: ObjectiveId, client: ClientCaps): DestinationOption[] {
-  const pixel = client?.hasPixel ? {} : { note: "Pixel setup included" };
   const ig = client?.hasInstagram ? {} : { available: false, note: "Needs Instagram" };
   const opt = (id: Destination, label: string, blurb: string, extra: Partial<DestinationOption> = {}): DestinationOption => ({ id, label, blurb, available: true, ...extra });
   switch (objective) {
     case "OUTCOME_LEADS":
       return [
-        opt("lead_form", "Instant form", "A quick form inside Facebook/Instagram — name and phone are pre-filled."),
-        opt("whatsapp", "WhatsApp", "Opens a WhatsApp chat with the business. The Page must be linked to WhatsApp Business."),
-        opt("call", "Phone call", "People tap to call the business. Mobile only."),
-        opt("website", "Website form", "Leads fill a form on your website — tracked by your Pixel.", pixel),
+        opt("lead_form", "Instant form", "A quick sign-up form inside Facebook/Instagram — name and phone are pre-filled."),
+        opt("call", "Phone call", "People tap to call the campaign office. Mobile only."),
       ];
     case "OUTCOME_TRAFFIC":
       return [
@@ -171,25 +151,21 @@ export function destinationOptions(objective: ObjectiveId, client: ClientCaps): 
         opt("instagram_profile", "Instagram profile", "Get profile visits and followers. Runs on Instagram only.", ig),
       ];
     case "OUTCOME_AWARENESS":
-      return [opt("none", "Reach people nearby", "No click goal — Meta shows the ad to as many people in your areas as possible.")];
+      return [opt("none", "Reach voters", "No click goal — Meta shows the ad to as many people in the chosen areas as possible.")];
     case "OUTCOME_ENGAGEMENT":
       return [
-        opt("whatsapp", "WhatsApp", "Start chats on WhatsApp. The Page must be linked to WhatsApp Business."),
         opt("messenger", "Messenger", "Start chats with your Facebook Page."),
         opt("instagram_dm", "Instagram Direct", "Start DMs with your Instagram account.", ig),
       ];
-    case "OUTCOME_SALES":
-      return [opt("website", "Website purchases", "People buy on your website — tracked by your Pixel.", pixel)];
   }
 }
 
 export const defaultDestination = (objective: ObjectiveId): Destination =>
-  ({ OUTCOME_LEADS: "lead_form", OUTCOME_TRAFFIC: "website", OUTCOME_AWARENESS: "none", OUTCOME_ENGAGEMENT: "whatsapp", OUTCOME_SALES: "website" })[objective] as Destination;
+  (({ OUTCOME_LEADS: "lead_form", OUTCOME_TRAFFIC: "website", OUTCOME_AWARENESS: "none", OUTCOME_ENGAGEMENT: "messenger" }) satisfies Record<ObjectiveId, Destination>)[objective];
 
 export const DESTINATION_LABELS: Record<Destination, string> = {
   website: "Website",
   lead_form: "Instant form",
-  whatsapp: "WhatsApp chat",
   call: "Phone call",
   messenger: "Messenger chat",
   instagram_dm: "Instagram Direct",
@@ -199,8 +175,8 @@ export const DESTINATION_LABELS: Record<Destination, string> = {
 
 /** Default button for a destination (website depends on the goal). */
 export function defaultCta(objective: ObjectiveId, destination: Destination): CtaType {
-  if (destination === "website") return objective === "OUTCOME_SALES" ? "SHOP_NOW" : objective === "OUTCOME_LEADS" ? "SIGN_UP" : "LEARN_MORE";
-  if (destination === "lead_form") return "GET_QUOTE";
+  if (destination === "website") return objective === "OUTCOME_LEADS" ? "SIGN_UP" : "LEARN_MORE";
+  if (destination === "lead_form") return "SIGN_UP";
   return CTA_FOR[destination][0];
 }
 
@@ -264,13 +240,6 @@ export type Draft = {
     url: string;
     /** Call ads: number with country code. */
     phone: string;
-    /** WhatsApp ads: optional business number (else the Page's linked one). */
-    whatsappNumber: string;
-    /** Website conversions (Sales / website leads): Pixel event to optimise for. */
-    conversionEvent: ConversionEvent;
-    whatsapp: DraftWhatsApp;
-    /** Meta Pixel used for website goals (saved on the client too). */
-    pixel: { id: string; name: string } | null;
     primaryText: string;
     headline: string;
     description: string;
@@ -290,7 +259,7 @@ export type Draft = {
   };
 };
 
-export const initialDraft = (client: { id: number; name: string; pixelId?: string | null; pixelName?: string | null } | null): Draft => ({
+export const initialDraft = (client: { id: number; name: string } | null): Draft => ({
   objective: null,
   clientId: client?.id ?? null,
   setup: { businessName: client?.name ?? "", website: "", about: "", offer: "", cities: [], scope: "hyper-local", language: "hi" },
@@ -299,7 +268,7 @@ export const initialDraft = (client: { id: number; name: string; pixelId?: strin
   campaign: { name: "", budgetType: "daily", amount: String(CURRENCY.INR.defaultDailyBudget), currency: "INR", startDate: "", endDate: "", frequencyCap: 2 },
   audience: { locations: [], ageMin: 18, ageMax: 65, gender: "any", language: "All languages", interests: [], mode: "strict", device: "all", why: "", type: "core", include: [], exclude: [] },
   placements: { mode: "advantage", facebook: true, instagram: true },
-  ad: { destination: "lead_form", url: "", phone: "", whatsappNumber: "", conversionEvent: "LEAD", whatsapp: { greeting: "", style: "prefill", prefill: "", questions: [], perItem: false }, pixel: client?.pixelId ? { id: client.pixelId, name: client.pixelName ?? `Pixel ${client.pixelId}` } : null, primaryText: "", headline: "", description: "", cta: "GET_QUOTE", format: "single", media: {}, leadForm: { name: "", privacyUrl: "", fields: ["FULL_NAME", "PHONE_NUMBER", "EMAIL"], questions: [], thankYou: "Thanks! We'll call you back shortly." }, cardIdeas: [], carousel: { cards: [], optimizeOrder: true, endCard: false }, digitallyCreated: false, copyReviewed: false, mcmcCertificateId: null },
+  ad: { destination: "lead_form", url: "", phone: "", primaryText: "", headline: "", description: "", cta: "SIGN_UP", format: "single", media: {}, leadForm: { name: "", privacyUrl: "", fields: ["FULL_NAME", "PHONE_NUMBER", "EMAIL"], questions: [], thankYou: "Thank you! Our team will contact you soon." }, cardIdeas: [], carousel: { cards: [], optimizeOrder: true, endCard: false }, digitallyCreated: false, copyReviewed: false, mcmcCertificateId: null },
 });
 
 /**
@@ -320,10 +289,12 @@ export function normalizeDraft(d: Draft): Draft {
       ...d.ad,
       media: { ...base.ad.media, ...d.ad?.media },
       leadForm: { ...base.ad.leadForm, ...d.ad?.leadForm },
-      whatsapp: { ...base.ad.whatsapp, ...d.ad?.whatsapp },
       carousel: { ...base.ad.carousel, ...d.ad?.carousel },
     },
   };
+  // Drafts saved before WhatsApp/Sales were removed fall back to a supported goal.
+  if ((out.objective as string) === "OUTCOME_SALES") out.objective = "OUTCOME_TRAFFIC";
+  if ((out.ad.destination as string) === "whatsapp") out.ad = { ...out.ad, destination: out.objective ? defaultDestination(out.objective) : "lead_form" };
   // Keep the button valid for the destination (lists can change between versions).
   if (out.objective && !CTA_FOR[out.ad.destination].includes(out.ad.cta)) out.ad = { ...out.ad, cta: defaultCta(out.objective, out.ad.destination) };
   return out;

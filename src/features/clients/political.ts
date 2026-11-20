@@ -19,7 +19,7 @@ export const UP_PARTIES = [
 ];
 
 /** ECI election-expense limit for an Assembly candidate in UP (₹40 lakh, 2022 revision). */
-export const UP_AC_SPEND_LIMIT_INR = 40_00_000;
+export { UP_AC_SPEND_LIMIT_INR } from "../spend/limits.ts";
 
 export const partyLabel = (party: string | null) => party?.trim() || INDEPENDENT;
 

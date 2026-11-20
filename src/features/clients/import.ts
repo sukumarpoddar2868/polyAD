@@ -89,8 +89,6 @@ export async function importClients(user: { id: number; clientLimit: number }, c
         pageName: page?.name ?? null,
         instagramId: page?.instagram?.id ?? null,
         instagramUsername: page?.instagram?.username ?? null,
-        pixelId: null,
-        pixelName: null,
       });
       created.push({ id: clientId, name: clientName });
       remaining--;

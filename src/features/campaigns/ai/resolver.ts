@@ -1,14 +1,13 @@
 import "server-only";
 import { groqJson } from "@/lib/ai/groq";
 import { resolvePicks } from "../geo/resolve.ts";
-import type { Currency, Destination } from "../engine/presets.ts";
+import type { Currency, PolyadDestination } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
 import {
   cardsPrompt,
   sanitizeCards,
   type CardIdea,
   LocationGuess,
-  copyPrompt,
   fallbackCopy,
   locationPrompt,
   sanitizeCopy,
@@ -50,31 +49,6 @@ export async function resolveLocations(p: {
   return { pins: r.areas.map((a) => ({ ...a, why: a.why })), notes: r.notes };
 }
 
-/** Ad copy + campaign basics. Validated, retried once, then a safe fallback. */
-export async function generateCopy(p: {
-  businessName: string;
-  about: string;
-  offer: string;
-  currency: Currency;
-  destination: Destination;
-  objective?: string;
-  ctas: readonly CtaType[];
-  locationCount: number;
-  fallbackName: string;
-}): Promise<{ copy: CopySuggestion; fallback: boolean }> {
-  const prompt = copyPrompt(p);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const raw = JSON.parse(await groqJson(prompt, { maxTokens: 6000, temperature: 0.7 })) as Record<string, unknown>;
-      const copy = sanitizeCopy(raw, p);
-      if (copy) return { copy, fallback: false };
-    } catch {
-      // retry, then fall back
-    }
-  }
-  return { copy: fallbackCopy(p), fallback: true };
-}
-
 /** Every voter-facing string in a suggestion, for the guardrail check. */
 export const copyTexts = (c: CopySuggestion) => [
   c.primary_text,
@@ -83,9 +57,6 @@ export const copyTexts = (c: CopySuggestion) => [
   ...c.carousel_cards.flatMap((x) => [x.headline, x.description]),
   ...c.lead_questions,
   c.thank_you_message,
-  c.whatsapp_greeting,
-  c.whatsapp_prefill,
-  ...c.whatsapp_questions,
 ];
 
 export const candidateAllow = (c: CandidateBrief) => [c.name, c.party, c.symbol, c.seat?.name, c.seat?.district];
@@ -101,7 +72,7 @@ export async function generatePoliticalCopy(p: {
   about: string;
   offer: string;
   currency: Currency;
-  destination: Destination;
+  destination: PolyadDestination;
   ctas: readonly CtaType[];
   locationCount: number;
   fallbackName: string;
@@ -132,13 +103,12 @@ export async function generatePoliticalCopy(p: {
 
 /** Carousel card headlines/descriptions. Retries once; throws if nothing usable. */
 export async function generateCards(p: {
-  businessName: string;
   about: string;
   offer: string;
-  destination: Destination;
-  objective?: string;
+  destination: PolyadDestination;
   count: number;
-  political?: { candidate: CandidateBrief; language: CopyLanguage };
+  candidate: CandidateBrief;
+  language: CopyLanguage;
 }): Promise<CardIdea[]> {
   const prompt = cardsPrompt(p);
   for (let attempt = 0; attempt < 2; attempt++) {

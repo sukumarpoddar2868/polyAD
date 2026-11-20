@@ -38,12 +38,6 @@ const MetaEnvSchema = z.object({
     .optional()
     .transform((v) => v?.trim().replace(/^act_/, "") || undefined),
   META_TOKEN_ENCRYPTION_KEY: z.string().length(44),
-  // "true" only once Pixel + CAPI are verified: unlocks conversion objectives
-  // (Sales, Website leads). Instant Form leads never need it.
-  CONVERSION_TRACKING_VERIFIED: z
-    .string()
-    .optional()
-    .transform((v) => v?.trim().toLowerCase() === "true"),
 });
 export type MetaEnv = z.infer<typeof MetaEnvSchema>;
 

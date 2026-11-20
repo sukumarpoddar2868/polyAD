@@ -10,15 +10,15 @@ import { getCertificate, scheduleFor } from "@/features/compliance/data";
 import { checkSilence, fmtIst, metaIst } from "@/features/compliance/silence";
 import { metaLinks } from "@/features/meta-connect/discovery";
 import { getConnectionToken } from "@/features/meta-connect/store";
-import { MetaApiError, graphGet } from "@/lib/meta/graph";
+import { MetaApiError } from "@/lib/meta/graph";
 import { CTA_TYPES } from "./engine/schema.ts";
-import { CONVERSION_EVENTS, CTA_FOR, CURRENCIES, DESTINATIONS } from "./engine/presets.ts";
+import { CTA_FOR, CURRENCIES, CURRENCY, POLYAD_DESTINATIONS, POLYAD_OBJECTIVES } from "./engine/presets.ts";
+import { checkNewCampaign } from "@/features/spend/limits";
+import { loadSpend } from "@/features/spend/load";
 import { resolveInterestIds } from "./interests";
 import { launchCampaign, type LaunchInput } from "./launch";
 import { pushImage, pushVideo } from "./media/push";
 import { recordLaunch, removeMedia } from "./store";
-import { createItemToken, itemUrl } from "./whatsapp/item-link";
-import { itemMessage, waDigits, waLink } from "./whatsapp/links";
 
 /* ---------- What the browser sends (paths only — never blobs) ---------- */
 
@@ -28,7 +28,7 @@ const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const LaunchPayload = z.object({
   clientId: z.number().int().positive(),
-  objective: z.enum(["OUTCOME_LEADS", "OUTCOME_TRAFFIC", "OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT", "OUTCOME_SALES"]),
+  objective: z.enum(POLYAD_OBJECTIVES),
   campaign: z.object({
     name: z.string().trim().min(1, "Add a campaign name.").max(200),
     budgetType: z.enum(["daily", "lifetime"]),
@@ -52,18 +52,9 @@ const LaunchPayload = z.object({
   }),
   placements: z.object({ manual: z.boolean(), facebook: z.boolean(), instagram: z.boolean() }),
   ad: z.object({
-    destination: z.enum(DESTINATIONS),
+    destination: z.enum(POLYAD_DESTINATIONS),
     url: z.union([z.literal(""), url]),
     phone: z.string().max(30),
-    whatsappNumber: z.string().max(30),
-    conversionEvent: z.enum([...CONVERSION_EVENTS.OUTCOME_SALES, ...CONVERSION_EVENTS.OUTCOME_LEADS]),
-    whatsapp: z.object({
-      greeting: z.string().trim().max(300),
-      style: z.enum(["prefill", "questions"]),
-      prefill: z.string().trim().max(200),
-      questions: z.array(z.string().trim().max(80)).max(4),
-      perItem: z.boolean(),
-    }),
     primaryText: z.string().trim().min(1, "Write the primary text.").max(2000),
     headline: z.string().trim().max(40),
     description: z.string().trim().max(125),
@@ -77,7 +68,6 @@ const LaunchPayload = z.object({
           description: z.string().max(125),
           link: z.union([z.literal(""), url]),
           imagePath: path,
-          waMessage: z.string().trim().max(200).optional(),
         }),
       )
       .max(10),
@@ -141,20 +131,6 @@ function knownFix(message: string | undefined): LaunchActionResult["fix"] {
   return undefined;
 }
 
-/** A Pixel counts as working if it fired in the last 30 days. */
-async function pixelStatus(token: string, pixelId: string): Promise<{ ok: true } | { ok: false; message: string }> {
-  try {
-    const px = await graphGet<{ last_fired_time?: string; is_unavailable?: boolean }>(pixelId, token, { fields: "last_fired_time,is_unavailable" });
-    if (px.is_unavailable) return { ok: false, message: "This Pixel is unavailable in Meta. Pick another Pixel on the client page." };
-    const fired = px.last_fired_time ? Date.parse(px.last_fired_time) : NaN;
-    if (!Number.isFinite(fired)) return { ok: false, message: "This Pixel has never recorded any activity. Install it on the website first, or use an instant form / WhatsApp / calls." };
-    if (Date.now() - fired > 30 * 24 * 3600 * 1000) return { ok: false, message: "This Pixel hasn't recorded activity in the last 30 days. Check it's installed on the website." };
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: `Couldn't check the Pixel: ${e instanceof MetaApiError ? e.userMessage || e.message : "unknown error"}` };
-  }
-}
-
 const STEP_LABEL = { lead_form: "Instant form", campaign: "Campaign", ad_set: "Ad set", ad: "Ad" } as const;
 
 function originOf(u: string) {
@@ -174,18 +150,9 @@ function problems(p: z.output<typeof LaunchPayload>): string[] {
   const phone = (v: string) => /^\+[1-9]\d{7,14}$/.test(v.replace(/[^\d+]/g, ""));
   if (p.ad.destination === "website" && !p.ad.url) out.push("Add the website link people should visit.");
   if (p.ad.destination === "call" && !phone(p.ad.phone)) out.push("Add the phone number to call, with country code (e.g. +91 98765 43210).");
-  if (p.ad.destination === "whatsapp") {
-    if (!phone(p.ad.whatsappNumber)) out.push("Add your WhatsApp business number with country code, e.g. +91 98765 43210.");
-    const w = p.ad.whatsapp;
-    const perItem = p.ad.format === "carousel" && w.perItem;
-    if (!perItem && !w.greeting) out.push("Write the WhatsApp greeting.");
-    if (!perItem && w.style === "prefill" && !w.prefill) out.push("Write the message the customer sends on WhatsApp.");
-    if (!perItem && w.style === "questions" && !w.questions.some(Boolean)) out.push("Add at least one quick question for WhatsApp.");
-  }
   if (p.ad.destination === "none" && p.objective !== "OUTCOME_AWARENESS") out.push("Pick where people should go.");
-  // Every button must be one Meta accepts for this destination (per-item WhatsApp links use "Contact us").
-  const perItemWa = p.ad.destination === "whatsapp" && p.ad.format === "carousel" && p.ad.whatsapp.perItem;
-  if (!perItemWa && !CTA_FOR[p.ad.destination].includes(p.ad.cta)) out.push("That button isn't available for this destination — pick another in Creative.");
+  // Every button must be one Meta accepts for this destination.
+  if (!CTA_FOR[p.ad.destination].includes(p.ad.cta)) out.push("That button isn't available for this destination — pick another in Creative.");
   if (p.objective === "OUTCOME_AWARENESS" && p.ad.destination !== "none") out.push("Awareness campaigns don't use a destination.");
   if (p.ad.destination === "lead_form" && !p.ad.leadForm) out.push("Finish the instant form (privacy link + contact fields).");
   if (p.ad.format === "single" && !p.ad.media.feed) out.push("Upload the square feed image.");
@@ -225,7 +192,7 @@ export async function launchDraftAction(
   if (gaps.length) return fail(`Finish the candidate profile first: ${gaps.join(" ")}`);
   // Election rules (RPA s.123 / MCC): flagged words need a human review before anything goes to Meta.
   const hits = guardrailHits(
-    [p.ad.primaryText, p.ad.headline, p.ad.description, ...p.ad.cards.flatMap((c) => [c.headline, c.description]), ...(p.ad.leadForm?.questions ?? []), p.ad.leadForm?.thankYou, p.ad.whatsapp.greeting, p.ad.whatsapp.prefill, ...p.ad.whatsapp.questions],
+    [p.ad.primaryText, p.ad.headline, p.ad.description, ...p.ad.cards.flatMap((c) => [c.headline, c.description]), ...(p.ad.leadForm?.questions ?? []), p.ad.leadForm?.thankYou],
     [client.candidate_name, client.business_name, client.party, client.symbol, client.ac_no ? getSeat(client.ac_no)?.name : null],
   );
   if (hits.length && !p.ad.copyReviewed) {
@@ -257,18 +224,26 @@ export async function launchDraftAction(
 
   const token = client.meta_connection_id ? await getConnectionToken(user.id, client.meta_connection_id) : null;
   if (!token) return fail("This client's Facebook connection is missing or expired. Reconnect it on the client page.");
+  // ECI expense limit: what this campaign can spend (its Meta spend cap) must fit the candidate's ad budget.
+  let spendCapMax: number | null = null;
+  const budgetNote: string[] = [];
+  try {
+    const spend = await loadSpend(user.id, client);
+    if (spend.currency !== "INR" || p.campaign.currency !== "INR") {
+      budgetNote.push("Ad budget not checked: the ad account doesn't bill in INR.");
+    } else {
+      const plannedMax = p.campaign.budgetType === "lifetime" ? p.campaign.amount : p.campaign.amount * CURRENCY.INR.defaultSpendCapMultiplier;
+      const check = checkNewCampaign(spend, { budgetType: p.campaign.budgetType, amount: p.campaign.amount, plannedMax });
+      if (!check.ok) return fail(check.message);
+      spendCapMax = check.capTo;
+      if (check.capTo) budgetNote.push(`Spend cap set to ₹${check.capTo.toLocaleString("en-IN")} + GST so the candidate stays within the ad budget.`);
+      if (spend.uncapped.length) budgetNote.push(`${spend.uncapped.length} other campaign(s) have no spend cap and aren't counted — see the candidate page.`);
+    }
+  } catch (e) {
+    return fail(`Couldn't check the candidate's spend against the ad budget: ${e instanceof MetaApiError ? e.userMessage || e.message : e instanceof Error ? e.message : "unknown error"}`);
+  }
   if ((p.ad.destination === "instagram_dm" || p.ad.destination === "instagram_profile") && !client.instagram_actor_id) {
     return fail("Connect this client's Instagram account first (client page → assets).");
-  }
-
-  // Website conversions: the Pixel must exist and be recording activity.
-  const websiteConversions = p.ad.destination === "website" && (p.objective === "OUTCOME_SALES" || p.objective === "OUTCOME_LEADS");
-  let pixelActive = false;
-  if (websiteConversions) {
-    if (!client.pixel_id) return fail("Connect this client's Meta Pixel first (client page → assets).");
-    const status = await pixelStatus(token, client.pixel_id);
-    if (!status.ok) return fail(status.message);
-    pixelActive = true;
   }
 
   // Media: real upload only when going live (validate never gets past the campaign step).
@@ -299,21 +274,6 @@ export async function launchDraftAction(
     return fail(`Couldn't send your media to Meta: ${msg}`);
   }
 
-  // Carousel "message about that item": each card → wa.me link with its own text + signed item link.
-  const w = p.ad.whatsapp;
-  const perItem = p.ad.destination === "whatsapp" && p.ad.format === "carousel" && w.perItem;
-  if (perItem && media.carousel) {
-    const business = client.business_name ?? "our business";
-    media.carousel = {
-      ...media.carousel,
-      cards: media.carousel.cards.map((c, i) => {
-        const card = p.ad.cards[i];
-        const link = itemUrl(createItemToken({ path: card.imagePath, headline: card.headline, business, whatsapp: waDigits(p.ad.whatsappNumber) }));
-        return { ...c, link: waLink(p.ad.whatsappNumber, `${itemMessage(card.waMessage ?? "", card.headline)}\n${link}`) };
-      }),
-    };
-  }
-
   // AI / typed interest names → real Meta interest ids (top match each; misses are skipped).
   const interests = p.audience.interests.length ? await resolveInterestIds(token, p.audience.interests) : [];
 
@@ -335,27 +295,21 @@ export async function launchDraftAction(
     dailyBudget: p.campaign.amount,
     budgetType: p.campaign.budgetType,
     campaignName: p.campaign.name,
-    // Per-item WhatsApp links are plain links → Traffic (Meta chat ads allow one message per ad).
-    destination: perItem ? "website" : p.ad.destination,
-    objective: perItem ? "OUTCOME_TRAFFIC" : p.objective,
-    ctaType: perItem ? "CONTACT_US" : p.ad.cta,
-    landingPageUrl: perItem ? waLink(p.ad.whatsappNumber, w.prefill || "Hi! I saw your ad.") : landing || null,
-    whatsappChat:
-      p.ad.destination === "whatsapp" && !perItem
-        ? { greeting: w.greeting, prefill: w.style === "prefill" ? w.prefill : null, questions: w.style === "questions" ? w.questions.filter(Boolean) : [] }
-        : null,
+    destination: p.ad.destination,
+    objective: p.objective,
+    ctaType: p.ad.cta,
+    landingPageUrl: landing || null,
     language: p.audience.language,
     startDate: p.campaign.startDate ?? null,
     endDate: p.campaign.endDate ?? null,
     endTime: cap ? metaIst(cap.start) : null,
+    spendCapMax,
     launchStatus: status,
     advantageAudience: p.audience.advantage,
     deviceOs: p.audience.device,
     audiences: p.audience.include.length || p.audience.exclude.length ? { include: p.audience.include, exclude: p.audience.exclude } : null,
     instagramUsername: client.instagram_username,
     phoneNumber: p.ad.destination === "call" ? p.ad.phone.replace(/[^\d+]/g, "") : null,
-    whatsappNumber: p.ad.destination === "whatsapp" && p.ad.whatsappNumber.trim() ? p.ad.whatsappNumber.replace(/[^\d+]/g, "") : null,
-    pixel: websiteConversions ? { pixelId: client.pixel_id!, event: p.ad.conversionEvent } : null,
     specialAdCategory: "ISSUES_ELECTIONS_POLITICS",
     country: "India",
     digitallyCreatedMedia: p.ad.digitallyCreated,
@@ -375,7 +329,7 @@ export async function launchDraftAction(
     ...media,
   };
 
-  const outcome = await launchCampaign(user.id, p.clientId, input, mode, { conversionTrackingVerified: pixelActive });
+  const outcome = await launchCampaign(user.id, p.clientId, input, mode);
   const steps: LaunchStepView[] = (outcome.result?.steps ?? []).map((s) => ({ label: STEP_LABEL[s.resourceType], id: s.id, error: s.error }));
   const cleanup = outcome.result?.cleanup?.map((c) => `${STEP_LABEL[c.resourceType]} ${c.id}: ${c.deleted ? "deleted" : `not deleted (${c.error})`}`);
 
@@ -389,19 +343,16 @@ export async function launchDraftAction(
       draftId && Number.isSafeInteger(draftId) ? draftId : null,
       {
         clientId: p.clientId,
-        objective: perItem ? "OUTCOME_TRAFFIC" : p.objective,
+        objective: p.objective,
         campaign: { name: p.campaign.name, currency: p.campaign.currency, budgetType: p.campaign.budgetType, amount: p.campaign.amount },
         audience: { locations: p.audience.pins, type: p.audience.include.length ? "custom" : "core" },
-        ad: { destination: perItem ? "whatsapp" : p.ad.destination, format: p.ad.format, headline: p.ad.headline, cta: p.ad.cta, carousel: { cards: p.ad.cards } },
+        ad: { destination: p.ad.destination, format: p.ad.format, headline: p.ad.headline, cta: p.ad.cta, carousel: { cards: p.ad.cards } },
       },
       ids,
       { mcmcCertificateId: cert.id },
     ).catch(() => {});
-    // Per-item WhatsApp links show the card pictures from Storage — keep those.
-    if (!perItem) {
-      const m = p.ad.media;
-      await removeMedia(user.id, [m.feed, m.portrait, m.story, m.video, m.videoCover, ...p.ad.cards.map((c) => c.imagePath)].filter(Boolean) as string[]).catch(() => {});
-    }
+    const m = p.ad.media;
+    await removeMedia(user.id, [m.feed, m.portrait, m.story, m.video, m.videoCover, ...p.ad.cards.map((c) => c.imagePath)].filter(Boolean) as string[]).catch(() => {});
   }
   return {
     ok: true,
@@ -416,6 +367,6 @@ export async function launchDraftAction(
     steps,
     campaignId: ids.campaign,
     adsManagerUrl: mode === "live" ? metaLinks.adsManager(client.ad_account_id) : undefined,
-    note: [outcome.result.stoppedEarly, perItem ? "Per-item WhatsApp links run as a Traffic campaign (optimised for taps)." : null, ...silenceNote].filter(Boolean).join(" ") || undefined,
+    note: [outcome.result.stoppedEarly, ...silenceNote, ...budgetNote].filter(Boolean).join(" ") || undefined,
   };
 }

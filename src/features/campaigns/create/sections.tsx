@@ -11,7 +11,6 @@ import type { CtaType } from "../engine/schema.ts";
 import { CarouselEditor, starterCards } from "./carousel-editor";
 import { LaunchPanel } from "./launch-panel";
 import { LeadFormEditor } from "./lead-form-editor";
-import { WhatsAppEditor } from "./whatsapp-editor";
 import { DestinationDetails } from "./destination-details";
 import { MediaSlot } from "../media/media-slot";
 import { ctaLabel } from "./ad-preview";
@@ -395,7 +394,6 @@ export function PlacementsSection({ draft, update, goTo }: SectionProps) {
 function CopyCheck({ draft, update, allow }: { draft: Draft; update: SectionProps["update"]; allow: string[] }) {
   const ad = draft.ad;
   const lead = ad.destination === "lead_form";
-  const wa = ad.destination === "whatsapp";
   const hits = guardrailHits(
     [
       ad.primaryText,
@@ -403,7 +401,6 @@ function CopyCheck({ draft, update, allow }: { draft: Draft; update: SectionProp
       ad.description,
       ...(ad.format === "carousel" ? ad.carousel.cards.flatMap((c) => [c.headline, c.description]) : []),
       ...(lead ? [...ad.leadForm.questions, ad.leadForm.thankYou] : []),
-      ...(wa ? [ad.whatsapp.greeting, ad.whatsapp.prefill, ...ad.whatsapp.questions] : []),
     ],
     allow,
   );
@@ -590,18 +587,11 @@ export function CreativeSection({ draft, update, clients, goTo }: SectionProps) 
             </button>
           </p>
           {ad.destination === "lead_form" && <LeadFormEditor draft={draft} update={update} />}
-          {ad.destination === "whatsapp" && <WhatsAppEditor draft={draft} update={update} />}
           <DestinationDetails draft={draft} update={update} client={clients.find((c) => c.id === draft.clientId)} />
           <Field
             id="cta"
             label="Button"
-            hint={
-              ad.destination === "whatsapp" && ad.format === "carousel" && ad.whatsapp.perItem
-                ? "Item links show a “Contact us” button."
-                : ctas.length === 1
-                  ? "Messaging and call ads use a fixed button."
-                  : undefined
-            }
+            hint={ctas.length === 1 ? "Messaging and call ads use a fixed button." : undefined}
           >
             <Select id="cta" value={ad.cta} disabled={ctas.length === 1} onChange={(e) => set(update, "ad", { cta: e.target.value as CtaType })}>
               {ctas.map((c) => (
@@ -622,7 +612,6 @@ export function CreativeSection({ draft, update, clients, goTo }: SectionProps) 
 const DESTINATION_CHECK: Record<Draft["ad"]["destination"], string> = {
   website: "Website link added",
   lead_form: "Instant form ready",
-  whatsapp: "WhatsApp details OK",
   call: "Phone number added",
   messenger: "Messenger ready",
   instagram_dm: "Instagram Direct ready",

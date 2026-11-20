@@ -1,25 +1,10 @@
 "use client";
 
-
 import { buttonClass } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Field, Input } from "@/components/ui/field";
 import { Callout } from "@/components/ui/surface";
-import { CONVERSION_EVENTS, type ConversionEvent } from "../engine/presets.ts";
-import { PixelSetup } from "./pixel-setup";
-import { WhatsAppLinkCheck } from "./whatsapp-link-check";
 import { cleanPhone, isPhone, type Draft } from "./blueprint";
 import type { ClientOption, SectionProps } from "./create-campaign";
-
-
-const EVENT_LABELS: Record<ConversionEvent, string> = {
-  PURCHASE: "Purchase",
-  INITIATED_CHECKOUT: "Checkout started",
-  ADD_TO_CART: "Added to cart",
-  LEAD: "Lead (form submitted)",
-  COMPLETE_REGISTRATION: "Registration completed",
-  CONTACT: "Contact",
-  SCHEDULE: "Appointment booked",
-};
 
 /** Extra details the chosen destination needs (shown in Start and Creative). */
 export function DestinationDetails({
@@ -29,7 +14,6 @@ export function DestinationDetails({
   websiteError,
 }: Pick<SectionProps, "draft" | "update"> & { client?: ClientOption; websiteError?: string }) {
   const dest = draft.ad.destination;
-  const objective = draft.objective;
   const setAd = (patch: Partial<Draft["ad"]>) => update((d) => ({ ...d, ad: { ...d.ad, ...patch } }));
   // One website field feeds both the AI (setup.website) and the ad link (ad.url).
   const setWebsite = (v: string) => update((d) => ({ ...d, setup: { ...d.setup, website: v }, ad: { ...d.ad, url: d.ad.destination === "website" ? v : d.ad.url } }));
@@ -41,52 +25,10 @@ export function DestinationDetails({
   const phoneBad = (v: string) => (v.trim() && !isPhone(v) ? "Use the full number with country code, e.g. +91 98765 43210" : undefined);
 
   switch (dest) {
-    case "website": {
-      const conversions = objective === "OUTCOME_SALES" || objective === "OUTCOME_LEADS";
-      return (
-        <div className="flex flex-col gap-4">
-          {website("Website page", conversions ? "Where people buy or fill your form." : "The page people land on.", true)}
-          {conversions && objective && (
-            <Field id="event" label="Optimise for" hint="The Pixel event that counts as a result. It must fire on your website.">
-              <Select id="event" value={draft.ad.conversionEvent} onChange={(e) => setAd({ conversionEvent: e.target.value as ConversionEvent })}>
-                {CONVERSION_EVENTS[objective as "OUTCOME_SALES" | "OUTCOME_LEADS"].map((ev) => (
-                  <option key={ev} value={ev}>
-                    {EVENT_LABELS[ev]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          <PixelSetup draft={draft} update={update} required={conversions} />
-        </div>
-      );
-    }
+    case "website":
+      return website("Website page", "The page people land on.", true);
     case "lead_form":
       return website("Website", "Shown as a button on the form's thank-you screen.");
-    case "whatsapp":
-      return (
-        <div className="flex flex-col gap-4">
-          <Field
-            id="wa"
-            label="Your WhatsApp business number"
-            error={phoneBad(draft.ad.whatsappNumber)}
-            hint="Where leads arrive. Use the number of your WhatsApp Business app, with country code."
-          >
-            <WhatsAppLinkCheck clientId={client?.id ?? null} pageName={client?.pageName ?? null} number={draft.ad.whatsappNumber} valid={isPhone(draft.ad.whatsappNumber)}>
-              <Input
-                id="wa"
-                inputMode="tel"
-                placeholder="+91 98765 43210"
-                value={draft.ad.whatsappNumber}
-                aria-invalid={!!phoneBad(draft.ad.whatsappNumber)}
-                onChange={(e) => setAd({ whatsappNumber: e.target.value })}
-                onBlur={(e) => isPhone(e.target.value) && setAd({ whatsappNumber: cleanPhone(e.target.value) })}
-              />
-            </WhatsAppLinkCheck>
-          </Field>
-          {website("Website", "Helps the AI write better copy.")}
-        </div>
-      );
     case "call":
       return (
         <div className="flex flex-col gap-4">

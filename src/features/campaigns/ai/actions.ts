@@ -5,7 +5,7 @@ import { requireUser } from "@/features/auth/dal";
 import { getClient } from "@/features/clients/data";
 import { aiConfigured } from "@/lib/env";
 import { getConnectionToken } from "@/features/meta-connect/store";
-import { COUNTRY_TO_ISO, CTA_FOR, CURRENCIES, CURRENCY_TO_COUNTRY, DESTINATIONS } from "../engine/presets.ts";
+import { COUNTRY_TO_ISO, CTA_FOR, CURRENCIES, CURRENCY_TO_COUNTRY, POLYAD_DESTINATIONS, POLYAD_OBJECTIVES } from "../engine/presets.ts";
 import { resolveTyped } from "../geo/resolve.ts";
 import { REACH_SCOPES, expectedPins, type CardIdea, type CopySuggestion, type Pin } from "./prompts.ts";
 import { generateCards, generatePoliticalCopy, resolveLocations } from "./resolver.ts";
@@ -26,12 +26,11 @@ function candidateBrief(c: Pick<ClientRow, "candidate_name" | "business_name" | 
 }
 
 const text = (max: number) => z.string().trim().max(max);
-const OBJECTIVES_LIVE = ["OUTCOME_LEADS", "OUTCOME_TRAFFIC", "OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT", "OUTCOME_SALES"] as const;
 
 const SetupInput = z.object({
   clientId: z.number().int().positive(),
-  objective: z.enum(OBJECTIVES_LIVE),
-  destination: z.enum(DESTINATIONS),
+  objective: z.enum(POLYAD_OBJECTIVES),
+  destination: z.enum(POLYAD_DESTINATIONS),
   businessName: text(120).min(1, "Add the business name."),
   website: z.union([z.literal(""), z.url("Enter a full website address, starting with https://")]),
   about: text(2000).min(20, "Describe the candidate in a sentence or two."),
@@ -157,8 +156,8 @@ const CardsInput = z.object({
   businessName: text(120),
   about: text(2000),
   offer: text(2000),
-  destination: z.enum(DESTINATIONS),
-  objective: z.enum(OBJECTIVES_LIVE).optional(),
+  destination: z.enum(POLYAD_DESTINATIONS),
+  objective: z.enum(POLYAD_OBJECTIVES).optional(),
   count: z.number().int().min(2).max(10),
   language: z.enum(COPY_LANGUAGES).default("hi"),
 });
@@ -174,7 +173,7 @@ export async function generateCardsAction(input: z.input<typeof CardsInput>): Pr
   if (!client) return { ok: false, error: "Candidate not found." };
   if (!aiConfigured()) return { ok: false, error: "AI isn't configured on this server yet." };
   try {
-    return { ok: true, cards: await generateCards({ ...d, political: { candidate: candidateBrief(client, d.businessName), language: d.language } }) };
+    return { ok: true, cards: await generateCards({ ...d, candidate: candidateBrief(client, d.businessName) }) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "AI failed. Please try again." };
   }

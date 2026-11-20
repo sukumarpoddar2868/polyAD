@@ -6,12 +6,10 @@ import {
   adAccountHealth,
   buildReadiness,
   discoverAssets,
-  listPixels,
   missingScopes,
   permissionMessage,
   type AccountHealth,
   type Discovery,
-  type PixelOption,
   type ReadinessItem,
 } from "./discovery";
 import { getConnectionInfo, getConnectionToken, markConnection, type ConnectionInfo } from "./store";
@@ -19,7 +17,6 @@ import { getConnectionInfo, getConnectionToken, markConnection, type ConnectionI
 export type ClientMeta = {
   connection: ConnectionInfo | null;
   discovery: Discovery | null;
-  pixels: PixelOption[];
   health: AccountHealth | null;
   readiness: ReadinessItem[];
   error: string | null;
@@ -31,7 +28,6 @@ export async function loadClientMeta(userId: number, client: Client): Promise<Cl
   const empty = (error: string | null, conn = connection): ClientMeta => ({
     connection: conn,
     discovery: null,
-    pixels: [],
     health: null,
     error,
     readiness: buildReadiness({
@@ -40,7 +36,6 @@ export async function loadClientMeta(userId: number, client: Client): Promise<Cl
       pageId: client.page_id,
       pageName: client.page_name,
       instagramUsername: client.instagram_username,
-      pixelName: client.pixel_name,
       health: null,
       healthError: null,
     }),
@@ -63,9 +58,8 @@ export async function loadClientMeta(userId: number, client: Client): Promise<Cl
   if (!token) return empty("We couldn't read the saved Facebook login. Please reconnect.", { ...connection, connection_status: "error" });
 
   try {
-    const [discovery, pixels, healthResult, policyAccepted] = await Promise.all([
+    const [discovery, healthResult, policyAccepted] = await Promise.all([
       discoverAssets(token),
-      client.ad_account_id ? listPixels(token, client.ad_account_id) : Promise.resolve([]),
       client.ad_account_id
         ? adAccountHealth(token, client.ad_account_id).then(
             (h) => ({ h, err: null as string | null }),
@@ -77,7 +71,6 @@ export async function loadClientMeta(userId: number, client: Client): Promise<Cl
     return {
       connection,
       discovery,
-      pixels,
       health: healthResult.h,
       error: null,
       readiness: buildReadiness({
@@ -86,8 +79,7 @@ export async function loadClientMeta(userId: number, client: Client): Promise<Cl
         pageId: client.page_id,
         pageName: client.page_name,
         instagramUsername: client.instagram_username,
-        pixelName: client.pixel_name,
-        health: healthResult.h,
+          health: healthResult.h,
         healthError: healthResult.err,
         policyAccepted,
       }),

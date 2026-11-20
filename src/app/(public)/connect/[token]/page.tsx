@@ -69,12 +69,10 @@ async function Invite({ params, searchParams }: PageProps<"/connect/[token]">) {
             action={saveInviteAssetsAction.bind(null, token)}
             adAccounts={meta.discovery.adAccounts}
             pages={meta.discovery.pages}
-            pixels={meta.pixels}
             current={{
               adAccountId: client.ad_account_id,
               pageId: client.page_id,
               instagramId: client.instagram_actor_id,
-              pixelId: client.pixel_id,
             }}
             submitLabel="Finish"
           />

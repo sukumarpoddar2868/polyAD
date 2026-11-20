@@ -50,6 +50,10 @@ export type ClientRow = {
   ac_no: number | null;
   paid_for_by: string | null;
   political_ready_at: string | null;
+  /** Rupees incl. GST set aside for Meta ads (share of the ECI limit). null = whole limit. */
+  ad_budget_inr: number | null;
+  /** YYYY-MM-DD spend counts from (usually nomination). null = all time. */
+  expense_from: string | null;
 };
 
 export type MetaConnectionRow = {

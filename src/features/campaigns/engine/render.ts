@@ -63,6 +63,8 @@ export type RenderInput = {
   /** YYYY-MM-DD */
   startDate?: string | null;
   endDate?: string | null;
+  /** Lower the campaign spend cap to this (major units) — keeps a candidate inside their ad budget. */
+  spendCapMax?: number | null;
   /** Exact end time (ISO with offset); wins over endDate. Used to stop before an election silence period. */
   endTime?: string | null;
   launchStatus?: "PAUSED" | "ACTIVE";
@@ -329,7 +331,10 @@ export function renderSpec(input: RenderInput): CampaignSpecInput {
       special_ad_categories: [input.specialAdCategory ?? "NONE"],
       ...(political ? { special_ad_category_country: [countryIso] } : {}),
       buying_type: "AUCTION",
-      spend_cap: lifetime ? dailyMinor : dailyMinor * CURRENCY[currency].defaultSpendCapMultiplier,
+      spend_cap: Math.min(
+        lifetime ? dailyMinor : dailyMinor * CURRENCY[currency].defaultSpendCapMultiplier,
+        input.spendCapMax ? toMinor(input.spendCapMax, currency) : Infinity,
+      ),
     },
     ad_set: adSet,
     ad: {

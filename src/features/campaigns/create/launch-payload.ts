@@ -34,9 +34,6 @@ export function toLaunchPayload(d: Draft): LaunchPayload | null {
       destination: d.ad.destination,
       url: d.ad.destination === "website" ? d.ad.url.trim() : d.setup.website.trim(),
       phone: d.ad.phone,
-      whatsappNumber: d.ad.whatsappNumber,
-      conversionEvent: d.ad.conversionEvent,
-      whatsapp: d.ad.whatsapp,
       primaryText: d.ad.primaryText,
       headline: d.ad.headline,
       description: d.ad.description,
@@ -51,7 +48,7 @@ export function toLaunchPayload(d: Draft): LaunchPayload | null {
       },
       cards:
         d.ad.format === "carousel"
-          ? d.ad.carousel.cards.map((c) => ({ headline: c.headline, description: c.description, link: c.link.trim(), imagePath: c.image?.path ?? "", waMessage: c.waMessage }))
+          ? d.ad.carousel.cards.map((c) => ({ headline: c.headline, description: c.description, link: c.link.trim(), imagePath: c.image?.path ?? "" }))
           : [],
       optimizeOrder: d.ad.carousel.optimizeOrder,
       endCard: d.ad.carousel.endCard,

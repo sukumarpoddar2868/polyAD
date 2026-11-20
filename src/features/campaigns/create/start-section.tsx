@@ -41,7 +41,6 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
             ...d.ad,
             destination: defaultDestination(id),
             cta: defaultCta(id, defaultDestination(id)),
-            conversionEvent: id === "OUTCOME_SALES" ? "PURCHASE" : "LEAD",
           }
         : d.ad,
     }));
@@ -102,12 +101,6 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
           cta: c.call_to_action,
           cardIdeas: c.carousel_cards,
           copyReviewed: false,
-          whatsapp: {
-            ...d.ad.whatsapp,
-            greeting: c.whatsapp_greeting || d.ad.whatsapp.greeting,
-            prefill: c.whatsapp_prefill || d.ad.whatsapp.prefill,
-            questions: c.whatsapp_questions.length ? c.whatsapp_questions : d.ad.whatsapp.questions,
-          },
           leadForm: {
             ...d.ad.leadForm,
             name: d.ad.leadForm.name || `${s.businessName} volunteers`.slice(0, 60),
@@ -196,7 +189,6 @@ export function StartSection({ draft, update, clients, isAgency, goTo }: Section
                       ...d,
                       clientId: next?.id ?? null,
                       setup: { ...d.setup, businessName: next?.name ?? d.setup.businessName },
-                      ad: { ...d.ad, pixel: next?.pixelId ? { id: next.pixelId, name: next.pixelName ?? `Pixel ${next.pixelId}` } : null },
                     }));
                   }}
                 >

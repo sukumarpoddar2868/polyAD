@@ -21,10 +21,6 @@ export type ClientOption = {
   pageName: string | null;
   instagramUsername: string | null;
   pageId: string | null;
-  /** Connected Pixel (needed for Sales / website leads). */
-  hasPixel: boolean;
-  pixelId: string | null;
-  pixelName: string | null;
   hasInstagram: boolean;
   /** Candidate profile: what still blocks political ads (empty = ready). */
   politicalGaps: string[];

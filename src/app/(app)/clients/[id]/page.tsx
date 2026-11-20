@@ -22,6 +22,10 @@ import { listCertificates } from "@/features/compliance/data";
 import { Certificates, type CertView } from "@/features/compliance/components/certificates";
 import { MEDIA_BUCKET } from "@/features/campaigns/media/rules";
 import { db } from "@/lib/supabase/server";
+import { loadSpend, type SpendSummary } from "@/features/spend/load";
+import { UP_AC_SPEND_LIMIT_INR } from "@/features/spend/limits";
+import { BudgetForm } from "@/features/spend/components/budget-form";
+import { MetaApiError } from "@/lib/meta/graph";
 
 export const metadata: Metadata = { title: "Candidate" };
 
@@ -43,6 +47,10 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
   const liveBusinesses = businesses.filter((b) => b.connection_status === "connected");
   const conn = meta?.connection ?? null;
   const connected = conn?.connection_status === "connected";
+  const spend: SpendSummary | { error: string } | null =
+    !client.is_self && connected && client.ad_account_id
+      ? await loadSpend(user.id, client).catch((e) => ({ error: e instanceof MetaApiError ? e.userMessage || e.message : e instanceof Error ? e.message : "Couldn't load spend." }))
+      : null;
   const startUrl = `/api/meta/oauth/start?client=${client.id}`;
   const errKey = typeof sp.meta_error === "string" ? sp.meta_error : null;
   const justConnected = sp.connected === "1";
@@ -107,6 +115,33 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
             </p>
           </div>
           <Certificates clientId={client.id} certs={certs} />
+        </Card>
+      )}
+
+      {/* ------------------------------------------- Election expenditure */}
+      {!client.is_self && (
+        <Card className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[19px] font-extrabold">Election expenditure</h2>
+              <p className="mt-1 text-[14px] text-ink-muted">
+                Ad spend counts toward the candidate&apos;s ₹{UP_AC_SPEND_LIMIT_INR.toLocaleString("en-IN")} ECI limit. PolyAd won&apos;t launch a campaign that could go over the ad budget.
+              </p>
+            </div>
+            {spend && !("error" in spend) && (
+              <ButtonLink href={`/api/clients/${client.id}/expenses`} variant="secondary" size="sm" prefetch={false}>
+                Download expense report (CSV)
+              </ButtonLink>
+            )}
+          </div>
+          {!spend ? (
+            <p className="text-[14px] text-ink-muted">Connect the candidate&apos;s ad account to see spend.</p>
+          ) : "error" in spend ? (
+            <Callout tone="error">{spend.error}</Callout>
+          ) : (
+            <SpendMeter s={spend} />
+          )}
+          <BudgetForm clientId={client.id} budget={client.ad_budget_inr} from={client.expense_from} limit={UP_AC_SPEND_LIMIT_INR} />
         </Card>
       )}
 
@@ -196,12 +231,10 @@ export default async function ClientPage({ params, searchParams }: PageProps<"/c
             action={saveAssetsAction.bind(null, client.id)}
             adAccounts={meta.discovery.adAccounts}
             pages={meta.discovery.pages}
-            pixels={meta.pixels}
             current={{
               adAccountId: client.ad_account_id,
               pageId: client.page_id,
               instagramId: client.instagram_actor_id,
-              pixelId: client.pixel_id,
             }}
           />
         </Card>
@@ -264,6 +297,42 @@ async function certificateViews(userId: number, clientId: number): Promise<CertV
     fileUrl: r.file_path ? (urls.get(r.file_path) ?? null) : null,
     used: counts.get(r.id) ?? 0,
   }));
+}
+
+const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
+function SpendMeter({ s }: { s: SpendSummary }) {
+  const pct = (n: number) => `${Math.min(100, (n / s.budget) * 100).toFixed(1)}%`;
+  const bar = s.level === "ok" ? "bg-lavender-deep" : s.level === "warn" ? "bg-chartreuse" : "bg-tomato-700";
+  return (
+    <div className="flex flex-col gap-3">
+      {s.currency !== "INR" && <Callout tone="error">This ad account bills in {s.currency}, not INR — the amounts below are not rupees.</Callout>}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[24px] font-extrabold tabular-nums">
+          {inr(s.spent)} <span className="text-[15px] font-bold text-ink-muted">of {inr(s.budget)} spent</span>
+        </p>
+        <Chip tone={s.level === "ok" ? "active" : s.level === "warn" ? "paused" : "stopped"}>{Math.round(s.share * 100)}% used</Chip>
+      </div>
+      <div className="flex h-3 overflow-hidden rounded-pill bg-lavender-soft" role="img" aria-label={`${Math.round(s.share * 100)}% of the ad budget spent`}>
+        <div className={bar} style={{ width: pct(s.spent) }} />
+        <div className="bg-lavender" style={{ width: pct(s.committed) }} />
+      </div>
+      <dl className="grid gap-3 text-[14px] sm:grid-cols-3">
+        <Stat label="Spent (incl. 18% GST)" value={inr(s.spent)} />
+        <Stat label="Booked by running campaigns" value={inr(s.committed)} />
+        <Stat label="Left for new campaigns" value={`${inr(s.headroom * 1.18)}`} />
+      </dl>
+      <p className="text-[13px] text-ink-muted">
+        {s.from ? `Counting from ${fmtDate(s.from)}.` : "Counting all spend on the ad account."} Meta spend {inr(s.spentExGst)} + GST (estimate — check against Meta invoices). “Booked” = what campaigns that aren&apos;t finished may still spend, up to their spend caps.
+      </p>
+      {s.uncapped.length > 0 && (
+        <Callout tone="error">
+          {s.uncapped.length} campaign{s.uncapped.length === 1 ? " has" : "s have"} no spend cap, so PolyAd can&apos;t count what {s.uncapped.length === 1 ? "it" : "they"} may still spend: {s.uncapped.slice(0, 5).join(", ")}
+          {s.uncapped.length > 5 ? "…" : ""}. Set a spend cap in Ads Manager or archive {s.uncapped.length === 1 ? "it" : "them"}.
+        </Callout>
+      )}
+    </div>
+  );
 }
 
 function money(v: number | null, currency: string) {

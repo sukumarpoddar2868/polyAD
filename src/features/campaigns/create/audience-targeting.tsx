@@ -191,7 +191,7 @@ function AudienceList({
   );
 }
 
-type CustomSource = "customer_list" | "website" | "facebook_page" | "instagram";
+type CustomSource = "customer_list" | "facebook_page" | "instagram";
 
 function CreateCustom({
   draft,
@@ -208,19 +208,16 @@ function CreateCustom({
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [days, setDays] = useState(30);
-  const [urlContains, setUrl] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const cc = PHONE_CC[draft.campaign.currency] ?? "91";
   const parsed = source === "customer_list" && text.trim() ? parseCustomerList(text, cc) : null;
-  const hasPixel = Boolean(draft.ad.pixel || client?.hasPixel);
   const defaultName = {
     customer_list: "Customer list",
-    website: `Website visitors ${days}d`,
     facebook_page: `Facebook engagers ${days}d`,
     instagram: `Instagram engagers ${days}d`,
   }[source];
-  const dayOptions = source === "website" ? [7, 30, 60, 90, 180] : [30, 90, 180, 365];
+  const dayOptions = [30, 90, 180, 365];
 
   const create = () => {
     if (!draft.clientId) return onError({ error: "Choose a client in Start first." });
@@ -238,7 +235,7 @@ function CreateCustom({
         setMsg(`Uploaded ${r.uploaded.toLocaleString()} customers. Meta matches them to profiles over the next few hours.`);
         onCreated(r.audience);
       } else {
-        const r = await createRuleAudienceAction(draft.clientId!, { name: finalName, source, days, urlContains: urlContains || undefined });
+        const r = await createRuleAudienceAction(draft.clientId!, { name: finalName, source, days });
         if (!r.ok) return onError(r);
         setMsg("Audience created. Meta fills it with people from the chosen period.");
         onCreated(r.audience);
@@ -247,7 +244,7 @@ function CreateCustom({
     });
   };
 
-  const blocked = (source === "website" && !hasPixel) || (source === "instagram" && !client?.hasInstagram);
+  const blocked = source === "instagram" && !client?.hasInstagram;
 
   return (
     <div className="flex flex-col gap-3 border-t border-line pt-4">
@@ -258,7 +255,6 @@ function CreateCustom({
         onChange={(v) => setSource(v)}
         options={[
           { value: "customer_list", label: "Customer list" },
-          { value: "website", label: "Website visitors" },
           { value: "facebook_page", label: "Facebook engagers" },
           { value: "instagram", label: "Instagram engagers" },
         ]}
@@ -301,7 +297,7 @@ function CreateCustom({
 
       {source !== "customer_list" && (
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field id="ca-days" label={source === "website" ? "Visited in the last" : "Engaged in the last"}>
+          <Field id="ca-days" label="Engaged in the last">
             <Select id="ca-days" className="bg-paper" value={days} onChange={(e) => setDays(Number(e.target.value))}>
               {dayOptions.map((d) => (
                 <option key={d} value={d}>
@@ -310,14 +306,8 @@ function CreateCustom({
               ))}
             </Select>
           </Field>
-          {source === "website" && (
-            <Field id="ca-url" label="Page URL contains (optional)" hint="e.g. /pricing — empty = any page">
-              <Input id="ca-url" className="bg-paper" value={urlContains} onChange={(e) => setUrl(e.target.value)} />
-            </Field>
-          )}
         </div>
       )}
-      {source === "website" && !hasPixel && <Callout tone="error">Website visitors need a Meta Pixel. Set one up in Start (website goals) or on the client page.</Callout>}
       {source === "instagram" && !client?.hasInstagram && <Callout tone="error">Connect this client&apos;s Instagram account first.</Callout>}
       {(source === "facebook_page" || source === "instagram") && (
         <p className="text-[12px] text-ink-muted">Includes people who visited your profile, liked, commented, saved, messaged or tapped an ad.</p>

@@ -4,7 +4,7 @@
  * campaign name, daily budget and call-to-action. Pure: no server-only.
  */
 import { z } from "zod";
-import { CURRENCY, type Currency, type Destination } from "../engine/presets.ts";
+import { CURRENCY, type Currency, type PolyadDestination } from "../engine/presets.ts";
 import type { CtaType } from "../engine/schema.ts";
 import { ELECTION_RULES, LANGUAGE_INFO, candidateLines, type CandidateBrief, type CopyLanguage } from "./political.ts";
 
@@ -119,10 +119,6 @@ export type CopySuggestion = {
   /** Instant form only: short qualifying questions + thank-you text. */
   lead_questions: string[];
   thank_you_message: string;
-  /** WhatsApp ads: business greeting, customer's pre-filled message, quick questions. */
-  whatsapp_greeting: string;
-  whatsapp_prefill: string;
-  whatsapp_questions: string[];
 };
 
 export type CardIdea = { headline: string; description: string };
@@ -144,43 +140,29 @@ export function sanitizeCards(raw: unknown, max = 10): CardIdea[] {
 
 /** Carousel cards on demand (Creative → "Write cards with AI"). */
 export function cardsPrompt(p: {
-  businessName: string;
   about: string;
   offer: string;
-  destination: Destination;
-  objective?: string;
+  destination: PolyadDestination;
   count: number;
-  political?: { candidate: CandidateBrief; language: CopyLanguage };
+  candidate: CandidateBrief;
+  language: CopyLanguage;
 }): string {
-  const pol = p.political;
-  return `Write ${p.count} carousel cards for a Meta (Facebook + Instagram) ad.
-${
-  pol
-    ? `
-This is a POLITICAL ad for an Indian election candidate.
-${candidateLines(pol.candidate)}
+  return `Write ${p.count} carousel cards for a POLITICAL Meta (Facebook + Instagram) ad for an Indian election candidate.
+
+${candidateLines(p.candidate)}
 About the candidate: ${p.about || "(not provided)"}
 What this ad says: ${p.offer || "(not provided)"}
 Goal: ${politicalGoal(p.destination)}
-Language: ${LANGUAGE_INFO[pol.language].brief}
+Language: ${LANGUAGE_INFO[p.language].brief}
 
 ${ELECTION_RULES}
-Cards: each a different point — the candidate, a local issue from the brief, a plan from the brief, the vote appeal.
-`
-    : `
-Business: ${p.businessName || "(not provided)"}
-About: ${p.about || "(not provided)"}
-Offer: ${p.offer || "(not provided)"}
-Goal: ${goalGuide(p.destination, p.objective)}
-`
-}
-Each card is one swipeable panel with its own image. Make every card a DIFFERENT angle:
-a specific service or product, a benefit, a proof point (experience, reviews implied by the text),
-or the offer/price. Card 1 should hook; the last card should push the action.
+Each card is one swipeable panel with its own image. Make every card a DIFFERENT point:
+the candidate, a local issue from the brief, a plan from the brief, the vote appeal.
+Card 1 should hook; the last card should push the action.
 
 STRICT RULES:
-  • headline: MAXIMUM 32 characters, specific, no emojis, no business name unless needed.
-  • description: MAXIMUM 50 characters, optional detail (price, time, place).
+  • headline: MAXIMUM 32 characters, specific, no emojis.
+  • description: MAXIMUM 50 characters, optional detail.
   • Exactly ${p.count} cards, no duplicates.
 
 Return one JSON object:
@@ -190,144 +172,15 @@ Return one JSON object:
 /** Sensible daily range for a local campaign, in major units. */
 export const BUDGET_RANGE: Record<Currency, [number, number]> = { INR: [300, 3000], USD: [10, 100] };
 
-/** Goal-specific writing brief: what the reader should do next. */
-const GOAL_GUIDE: Record<Destination, string> = {
-  lead_form: `LEADS via an instant form inside Facebook/Instagram.
-  The reader should feel safe sharing their name and phone number right now.
-  • Lead with the problem or outcome the reader cares about, then the offer.
-  • Make the next step tiny and clear: "Tap Get quote — we'll call you back", "Takes 30 seconds".
-  • Remove risk: free consultation / no obligation / reply within X hours, ONLY if implied by the offer.
-  • Use urgency only if the offer has a real deadline or limit.
-  • Headline = the outcome or the offer, not the business name.`,
-  website: `TRAFFIC to the business website.
-  The reader should want to click to learn more or see the full offer.
-  • Lead with curiosity or a specific benefit that the website delivers on.
-  • Tell them what they will find on the page (prices, menu, slots, catalogue).
-  • Do not promise a call-back or a form — they are going to a web page.
-  • Headline = the clearest reason to click.`,
-  whatsapp: `CHATS on WhatsApp — tapping opens a WhatsApp chat with the business.
-  • Invite a quick question: "Message us on WhatsApp for prices / availability / a free quote".
-  • Promise a fast, personal reply only if plausible ("we reply within minutes").
-  • Headline = what they get by messaging (quote, slot, menu, offer).`,
-  messenger: `CHATS on Messenger — tapping opens a Messenger chat with the Page.
-  • Invite a quick question or booking by message; keep it conversational.
-  • Headline = what they get by messaging.`,
-  instagram_dm: `CHATS in Instagram Direct — tapping opens a DM with the business's Instagram.
-  • Casual, visual tone; invite them to DM for details, prices or booking.
-  • Headline = what they get by sending a DM.`,
-  instagram_profile: `INSTAGRAM PROFILE VISITS — tapping opens the business's Instagram profile.
-  • Give a reason to check the profile and follow: new collection, daily offers, behind the scenes, reels.
-  • Visual, casual tone. No form or call-back promise.
-  • Headline = what they'll see on the profile.`,
-  call: `PHONE CALLS — tapping calls the business directly.
-  • Give a reason to call now (free consultation, instant quote, book today).
-  • Mention hours/availability only if given. Keep it short and local.
-  • Headline = why call, e.g. "Call for a free ITR check".`,
-  none: `AWARENESS — show the business to as many nearby people as possible.
-  • Make the business memorable: what it is, where, and one distinctive reason to remember it.
-  • No hard sell, no form or call-back promise.
-  • Headline = the business's key promise or offer.`,
-};
-
-const SALES_GUIDE = `SALES on the business website (online purchase).
-  • Lead with the product benefit and the price/offer; make buying feel easy and safe.
-  • Mention delivery, returns or payment options only if given.
-  • Headline = product + offer.`;
-const WEBSITE_LEADS_GUIDE = `LEADS via a form on the business website.
-  • Make filling the form feel worth it: what they get (quote, consultation, callback).
-  • Headline = the outcome or the offer.`;
-
-/** Brief for the AI given the campaign objective and destination. */
-export function goalGuide(destination: Destination, objective?: string): string {
-  if (destination === "website" && objective === "OUTCOME_SALES") return SALES_GUIDE;
-  if (destination === "website" && objective === "OUTCOME_LEADS") return WEBSITE_LEADS_GUIDE;
-  return GOAL_GUIDE[destination];
-}
-
-export function copyPrompt(p: {
-  businessName: string;
-  about: string;
-  offer: string;
-  currency: Currency;
-  destination: Destination;
-  objective?: string;
-  ctas: readonly CtaType[];
-  locationCount: number;
-}): string {
-  const [lo, hi] = BUDGET_RANGE[p.currency];
-  return `You are setting up a Meta (Facebook + Instagram) ad campaign for a local business.
-
-Business:
-  Name: ${p.businessName || "(not provided)"}
-  About: ${p.about || "(not provided)"}
-
-Product / offer for this campaign:
-  ${p.offer || "(not provided)"}
-
-Currency: ${p.currency}
-Campaign goal: ${goalGuide(p.destination, p.objective)}
-Target areas: ${p.locationCount} area(s)
-
-STRICT RULES:
-  • campaign_name: short internal name, MAXIMUM 40 characters, e.g. "ITR filing — July leads".
-  • daily_budget: a sensible starting DAILY budget in ${p.currency} (major units, a whole number)
-    between ${lo} and ${hi}, higher when there are more target areas or a high-value service.
-  • primary_text: 2–3 short sentences, MAXIMUM 400 characters, no line breaks.
-  • headline: MAXIMUM 35 characters.
-  • description: MAXIMUM 110 characters. Optional.
-  • call_to_action: exactly one of ${p.ctas.join(", ")} — the one that best matches the goal and offer.
-  • interest_targeting: exactly 3–5 relevant Meta interest names (topics people care about —
-    never phone brands or device names; phone type is handled by device_os).
-  • age_min / age_max: integers ${AGE_MIN}–${AGE_MAX} for the likely buyers.
-  • First infer the ideal customer from the business and offer (who buys, their age, income level, lifestyle).
-  • gender: exactly one of "any", "male", "female". Use "any" unless the offer is clearly for one gender.
-  • device_os: exactly one of "all", "android", "ios". Default "all". Use "ios" ONLY when the business or offer
-    mentions iPhone/Apple or is clearly premium / luxury / high-ticket (where iPhone users are the likely buyers);
-    "android" ONLY if Android is mentioned. When unsure, "all" — never narrow the audience without a clear reason.
-  • audience_why: one short sentence explaining the age, gender and phone choice.
-  • lead_questions: ${p.destination === "lead_form" ? "1–3 short qualifying questions for the instant form (MAXIMUM 80 characters each) that help the business prioritise leads, e.g. \"Salaried or self-employed?\". Never ask for name, phone, email or city — those are pre-filled." : "[] (empty — not a lead form)."}
-  • thank_you_message: ${p.destination === "lead_form" ? "one friendly sentence shown after the form is sent, saying what happens next (MAXIMUM 120 characters)." : "\"\""}
-  • whatsapp_greeting / whatsapp_prefill / whatsapp_questions: ${p.destination === "whatsapp" ? "the WhatsApp chat that opens after tapping. whatsapp_greeting = the business's friendly first message (MAXIMUM 200 characters, mention the business name). whatsapp_prefill = what the CUSTOMER sends, written in first person about this offer (MAXIMUM 120 characters, e.g. \"Hi! I'd like a quote for ITR filing.\"). whatsapp_questions = 3 short tappable questions a customer might ask (MAXIMUM 60 characters each)." : "empty strings / empty list (not a WhatsApp ad)."}
-  • carousel_cards: 4 cards for a carousel version of this ad — each a different service, benefit or
-    proof point; headline MAXIMUM 32 characters, description MAXIMUM 50 characters.
-
-OUTPUT RULES:
-  • One compact JSON object, no Markdown, no emojis, no line breaks inside strings.
-  • Copy must be specific to the offer — no generic filler or repetition.
-
-{
-  "campaign_name": "...",
-  "daily_budget": 500,
-  "primary_text": "...",
-  "headline": "...",
-  "description": "...",
-  "call_to_action": "${p.ctas[0]}",
-  "interest_targeting": ["...", "...", "..."],
-  "age_min": 25,
-  "age_max": 55,
-  "gender": "any",
-  "device_os": "all",
-  "audience_why": "...",
-  "carousel_cards": [{ "headline": "...", "description": "..." }],
-  "lead_questions": ["..."],
-  "thank_you_message": "...",
-  "whatsapp_greeting": "...",
-  "whatsapp_prefill": "...",
-  "whatsapp_questions": ["..."]
-}`;
-}
-
 /* ---------- Political ad copy ---------- */
 
 /** What the reader should do next, for a candidate's campaign. */
-export function politicalGoal(destination: Destination): string {
+export function politicalGoal(destination: PolyadDestination): string {
   switch (destination) {
     case "lead_form":
       return "SIGN-UPS — supporters and volunteers join the campaign via a short form inside Facebook/Instagram. Invite them to join the team; headline = the invitation.";
     case "website":
       return "VISITS to the campaign's web page — give a reason to read the candidate's plans; headline = what they will find.";
-    case "whatsapp":
-      return "CHATS on WhatsApp with the campaign team — invite voters to share their local issues or join updates; headline = why message.";
     case "messenger":
     case "instagram_dm":
       return "CHATS with the campaign Page — invite voters to share their local issues; headline = why message.";
@@ -340,14 +193,14 @@ export function politicalGoal(destination: Destination): string {
   }
 }
 
-/** Political version of copyPrompt: same JSON keys; audience fields are fixed in code, not asked. */
+/** Ad copy + campaign basics for a candidate; audience fields are fixed in code, not asked. */
 export function politicalCopyPrompt(p: {
   candidate: CandidateBrief;
   language: CopyLanguage;
   about: string;
   offer: string;
   currency: Currency;
-  destination: Destination;
+  destination: PolyadDestination;
   ctas: readonly CtaType[];
   locationCount: number;
 }): string {
@@ -374,13 +227,12 @@ FIELDS:
   • call_to_action: exactly one of ${p.ctas.join(", ")}.
   • lead_questions: ${p.destination === "lead_form" ? "1–2 short questions for volunteers (MAXIMUM 80 characters each), e.g. which ward/village they are from, how they can help. Never ask name, phone, email, city, religion or caste." : "[]"}
   • thank_you_message: ${p.destination === "lead_form" ? "one sentence after sign-up saying the team will contact them (MAXIMUM 120 characters)." : "\"\""}
-  • whatsapp_greeting / whatsapp_prefill / whatsapp_questions: ${p.destination === "whatsapp" ? "greeting from the campaign team (MAXIMUM 200 characters); prefill = what the VOTER sends, first person (MAXIMUM 120 characters); 3 short tappable questions (MAXIMUM 60 characters each)." : "empty strings / empty list."}
   • carousel_cards: 4 cards, each a different point; headline MAXIMUM 32 characters, description MAXIMUM 50 characters.
   • interest_targeting: [] (political ads are not targeted by interests).
   • age_min 18, age_max 65, gender "any", device_os "all", audience_why "".
 
 OUTPUT: one compact JSON object, no Markdown, no emojis, no line breaks inside strings:
-{"campaign_name":"...","daily_budget":${lo},"primary_text":"...","headline":"...","description":"...","call_to_action":"${p.ctas[0]}","interest_targeting":[],"age_min":18,"age_max":65,"gender":"any","device_os":"all","audience_why":"","carousel_cards":[{"headline":"...","description":"..."}],"lead_questions":[],"thank_you_message":"","whatsapp_greeting":"","whatsapp_prefill":"","whatsapp_questions":[]}`;
+{"campaign_name":"...","daily_budget":${lo},"primary_text":"...","headline":"...","description":"...","call_to_action":"${p.ctas[0]}","interest_targeting":[],"age_min":18,"age_max":65,"gender":"any","device_os":"all","audience_why":"","carousel_cards":[{"headline":"...","description":"..."}],"lead_questions":[],"thank_you_message":""}`;
 }
 
 /** Audience fields are never left to the model for political ads: all adult voters, no interests. */
@@ -444,9 +296,6 @@ export function sanitizeCopy(
       .filter((q) => q && !/\b(name|phone|e-?mail|city)\b/i.test(q))
       .slice(0, 3),
     thank_you_message: squash(raw.thank_you_message, 160),
-    whatsapp_greeting: squash(raw.whatsapp_greeting, 300),
-    whatsapp_prefill: squash(raw.whatsapp_prefill, 200),
-    whatsapp_questions: (Array.isArray(raw.whatsapp_questions) ? raw.whatsapp_questions : []).map((q) => squash(q, 80)).filter(Boolean).slice(0, 4),
   };
 }
 
@@ -476,8 +325,5 @@ export function fallbackCopy(p: {
     carousel_cards: [],
     lead_questions: [],
     thank_you_message: "",
-    whatsapp_greeting: `Hi! Thanks for contacting ${p.businessName || "us"}. How can we help?`.slice(0, 300),
-    whatsapp_prefill: "Hi! I'd like to know more about your offer.",
-    whatsapp_questions: [],
   };
 }

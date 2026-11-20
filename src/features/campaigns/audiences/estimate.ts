@@ -7,7 +7,7 @@ import { actId } from "@/features/meta-connect/discovery";
 import { getConnectionToken } from "@/features/meta-connect/store";
 import { MetaApiError, graphGet } from "@/lib/meta/graph";
 import { buildAll } from "../engine/builders.ts";
-import { CURRENCIES, DESTINATIONS } from "../engine/presets.ts";
+import { CURRENCIES, POLYAD_DESTINATIONS, POLYAD_OBJECTIVES } from "../engine/presets.ts";
 import { renderSpec } from "../engine/render.ts";
 import { validateSpec } from "../engine/schema.ts";
 
@@ -18,8 +18,8 @@ import { validateSpec } from "../engine/schema.ts";
 
 const Input = z.object({
   clientId: z.number().int().positive(),
-  objective: z.enum(["OUTCOME_LEADS", "OUTCOME_TRAFFIC", "OUTCOME_AWARENESS", "OUTCOME_ENGAGEMENT", "OUTCOME_SALES"]),
-  destination: z.enum(DESTINATIONS),
+  objective: z.enum(POLYAD_OBJECTIVES),
+  destination: z.enum(POLYAD_DESTINATIONS),
   currency: z.enum(CURRENCIES),
   pins: z.array(z.object({ lat: z.number(), lng: z.number(), radiusKm: z.number().min(1).max(80), geo: z.object({ kind: z.enum(["city", "neighborhood", "subcity", "zip"]), key: z.string().regex(/^[A-Za-z0-9:_-]{1,40}$/) }).nullish() })).max(200),
   ageMin: z.number().int().min(18).max(65),
@@ -52,9 +52,6 @@ export async function estimateAudienceAction(raw: EstimateInput): Promise<Estima
   const token = client.meta_connection_id ? await getConnectionToken(user.id, client.meta_connection_id) : null;
   if (!token) return { ok: false, error: "Connect Facebook for this client to see the audience size." };
 
-  // Website conversions without a Pixel can't be estimated as conversions — estimate reach for the same people instead.
-  const conversions = p.destination === "website" && (p.objective === "OUTCOME_SALES" || p.objective === "OUTCOME_LEADS");
-  const usePixel = conversions && client.pixel_id ? { pixelId: client.pixel_id, event: p.objective === "OUTCOME_SALES" ? "PURCHASE" : "LEAD" } : null;
   let ops;
   try {
     ops = buildAll(
@@ -65,15 +62,14 @@ export async function estimateAudienceAction(raw: EstimateInput): Promise<Estima
           adCopy: { primary_text: "estimate", headline: "estimate", age_min: p.ageMin, age_max: p.ageMax, gender: p.gender, interest_targeting: [] },
           epicenters: p.pins.map((x) => ({ lat: x.lat, lng: x.lng, radius_km: x.radiusKm, geo: x.geo ?? null })),
           dailyBudget: 500,
-          destination: conversions && !usePixel ? "website" : p.destination,
-          objective: conversions && !usePixel ? "OUTCOME_TRAFFIC" : p.objective,
+          destination: p.destination,
+          objective: p.objective,
           imageHash: "estimate",
           landingPageUrl: "https://example.com",
           language: p.language,
           deviceOs: p.device,
           advantageAudience: p.advantage,
           instagramUsername: client.instagram_username,
-          pixel: usePixel,
           audiences: p.include.length || p.exclude.length ? { include: p.include, exclude: p.exclude } : null,
           publisherPlatforms: p.manualPlacements
             ? ([p.facebook && "facebook", p.instagram && "instagram"].filter(Boolean) as ("facebook" | "instagram")[])

@@ -91,8 +91,6 @@ export type AssetSelection = {
   pageName: string | null;
   instagramId: string | null;
   instagramUsername: string | null;
-  pixelId: string | null;
-  pixelName: string | null;
 };
 
 export async function saveClientAssets(userId: number, clientId: number, a: AssetSelection) {
@@ -105,8 +103,6 @@ export async function saveClientAssets(userId: number, clientId: number, a: Asse
       page_name: a.pageName,
       instagram_actor_id: a.instagramId,
       instagram_username: a.instagramUsername,
-      pixel_id: a.pixelId,
-      pixel_name: a.pixelName,
       assets_updated_at: new Date().toISOString(),
       client_status: a.adAccountId && a.pageId ? "active" : "pending_access",
     })

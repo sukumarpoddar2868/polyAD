@@ -85,6 +85,11 @@ export type GenderPref = keyof typeof GENDER_TO_META;
 export const DESTINATIONS = ["website", "lead_form", "whatsapp", "call", "messenger", "instagram_dm", "instagram_profile", "none"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
+/** What PolyAd offers for political ads: no Sales (needs a Pixel) and no WhatsApp. */
+export const POLYAD_OBJECTIVES = ["OUTCOME_AWARENESS", "OUTCOME_LEADS", "OUTCOME_ENGAGEMENT", "OUTCOME_TRAFFIC"] as const;
+export const POLYAD_DESTINATIONS = ["website", "lead_form", "call", "messenger", "instagram_dm", "instagram_profile", "none"] as const satisfies readonly Destination[];
+export type PolyadDestination = (typeof POLYAD_DESTINATIONS)[number];
+
 /** Pixel events offered for website conversions. */
 export const CONVERSION_EVENTS = {
   OUTCOME_SALES: ["PURCHASE", "INITIATED_CHECKOUT", "ADD_TO_CART"],

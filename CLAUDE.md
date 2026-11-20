@@ -9,7 +9,7 @@ Internal tool for our agency to run **Indian political ads on Meta (FB/IG)** for
 Team makes images/videos; **AI (Groq) writes only the ad text** (Hindi/English, later Awadhi/Bhojpuri). No billing, no public signup.
 
 ## Origin
-Forked 2026-11-20 from Shryxa Ads (`/home/sukumar/projects/Ads/shryxa_ads/web`, its `CLAUDE.md` documents the engine, geo resolver, create wizard, Meta gotchas in depth). Removed: Razorpay billing + cron, marketing site, signup, legal pages, Meta data-deletion/deauthorize callbacks (stay on Shryxa's app). Kept for now: lead forms (volunteer sign-ups, shown as "Sign-ups"), WhatsApp, Pixel, `/w/[token]` — to be trimmed when the political wizard is built.
+Forked 2026-11-20 from Shryxa Ads (`/home/sukumar/projects/Ads/shryxa_ads/web`, its `CLAUDE.md` documents the engine, geo resolver, create wizard, Meta gotchas in depth). Removed: Razorpay billing + cron, marketing site, signup, legal pages, Meta data-deletion/deauthorize callbacks (stay on Shryxa's app). Phase E also removed WhatsApp, Pixel, Sales and `/w/[token]`; lead forms stay (volunteer sign-ups, shown as "Sign-ups").
 
 ## Shared infrastructure (important)
 - **Same Meta app as Shryxa**, Standard Access (only accounts where our team has app roles). Don't change its Login config while Shryxa's App Review runs. PolyAd redirect URI `${APP_URL}/api/meta/oauth/callback` must be in the app's Valid OAuth Redirect URIs.
@@ -21,7 +21,7 @@ Forked 2026-11-20 from Shryxa Ads (`/home/sukumar/projects/Ads/shryxa_ads/web`, 
 
 ## Stack & conventions
 Same as Shryxa: Next.js 16 App Router + TS · Tailwind 4 · Zod 4 · supabase-js service-role only · custom bcrypt auth · Fernet token crypto · Groq · MapLibre + OpenFreeMap.
-- `pnpm dev` · verify `pnpm run lint && pnpm run build` · `pnpm run test:engine` (52) · after adding routes `npx next typegen` before `tsc`.
+- `pnpm dev` · verify `pnpm run lint && pnpm run build` · `pnpm run test:engine` (54) · after adding routes `npx next typegen` before `tsc`.
 - **Next 16 differs from training data** → `node_modules/next/dist/docs/`. Middleware = `src/proxy.ts`. `cacheComponents` ON (session reads inside `<Suspense>`). React 19 strict lint.
 - Env only via `lib/env.ts`. Types hand-written in `lib/supabase/types.ts` (key `polyad`, mirror migrations). Every query scoped by `user.id`; `requireUser()` in every page and server action. Design tokens in `globals.css`, never raw hex.
 - **Never change schema without the user's explicit approval**: write `supabase/migrations/000N_*.sql` → dry-run in a rolled-back txn via `psql "$DATABASE_URL"` → show SQL + ask → apply. `supabase/shryxa_reference/` = Shryxa's migrations, reference only.
@@ -42,10 +42,13 @@ Same as Shryxa: Next.js 16 App Router + TS · Tailwind 4 · Zod 4 · supabase-js
 
 5. ✅ Phase C — ECI compliance gate (2026-11-20): migration `0003_compliance.sql` **applied** (`mcmc_certificates`, `poll_schedule` PK (user_id, ac_no), `campaigns.mcmc_certificate_id`). `features/compliance/`: `silence.ts` (pure: 48 h window ending at poll close, IST; `checkSilence` → blocked / capAt / missing), certificates card on candidate page (scan JPG/PNG → `polyad-media` `u{user}/c{client}/mcmc/`; bucket rejects PDF), `/schedule` page (date per districts/seat ranges). Wizard Creative: certificate picker (`ad.mcmcCertificateId`, required for the tick). Launch: needs the candidate's own certificate; seats = `seatsTouched(pins)` + candidate seat; blocked inside a window; otherwise ad set `end_time` capped at the earliest window start (`RenderInput.endTime`); note lists seats without a poll date. Browser-tested certificate + schedule add/delete.
 
+6. ✅ Phase D — spend vs ECI limit (2026-11-20; `0004_expense_budget.sql` **applied**: `clients.ad_budget_inr` (incl. GST, null = whole ₹40L) + `expense_from` date). `features/spend/`: `limits.ts` (pure: 18% GST, `allowance` = budget − spent − committed, `checkNewCampaign`), `load.ts` (live Meta insights for the whole ad account from `expense_from`; committed = spend_cap − spend of non-finished campaigns; uncapped campaigns listed), candidate-page "Election expenditure" card + budget form, CSV `/api/clients/[id]/expenses` (day × campaign, GST est.). Launch: blocks if the campaign's spend cap doesn't fit; daily budgets get `spendCapMax` = headroom. Budget form browser-tested; spend meter not yet tested with real spend (no connected candidate).
+7. ✅ Phase E — trim (2026-11-20, no schema change): deleted `/w/[token]`, `campaigns/whatsapp/`, `campaigns/pixel/`, WhatsApp editor/link check, Pixel setup + picker + discovery, `CONVERSION_TRACKING_VERIFIED`. Product layer uses `POLYAD_OBJECTIVES` (Awareness, Sign-ups=LEADS, Engagement, Traffic) + `POLYAD_DESTINATIONS` / `PolyadDestination` (presets.ts); engine stays generic (still knows WhatsApp/Pixel, parity tests). Pixel guard always on. Business-style AI prompts removed (only political). Old drafts: SALES→TRAFFIC, whatsapp→default destination. `clients.pixel_*` columns unused. List/metrics keep Sales/WhatsApp labels for campaigns made outside PolyAd.
+
 ## Next up
 1. Add PolyAd redirect URI to the Meta app; connect a test candidate (Page + ad account); launch one seat with `validate_only` to confirm Meta accepts overlapping circles.
 2. Enter the ECI poll dates on /schedule once announced. Later: warn on campaigns launched before their seats had a poll date (they aren't capped).
-3. D: spend per candidate vs ₹40L. E: trim WhatsApp/Pixel/Sales.
+3. Wording: some wizard/candidate texts still say "client"/"business" (e.g. "Business & goal").
 
 ## Working agreements
 - Commit only when asked; never stage `.env*`. Trailer: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.

@@ -11,7 +11,7 @@ import type { ClientRow } from "@/lib/supabase/types";
 
 /**
  * Custom & lookalike audiences in the client's ad account (Meta Marketing API):
- *   list · customer list (hashed in the browser) · website visitors (Pixel) ·
+ *   list · customer list (hashed in the browser) ·
  *   Facebook Page / Instagram engagers · lookalike.
  */
 
@@ -116,54 +116,37 @@ export async function createCustomerListAction(
 
 const RuleInput = z.object({
   name: Name,
-  source: z.enum(["website", "facebook_page", "instagram"]),
+  source: z.enum(["facebook_page", "instagram"]),
   days: z.number().int().min(1).max(730),
   urlContains: z.string().trim().max(200).optional(),
 });
 
-/** Website visitors (Pixel), Facebook Page engagers or Instagram engagers. */
+/** Facebook Page engagers or Instagram engagers. */
 export async function createRuleAudienceAction(clientId: number, input: z.input<typeof RuleInput>): Promise<{ ok: true; audience: AudienceItem } | Fail> {
   const p = RuleInput.safeParse(input);
   if (!p.success) return { ok: false, error: p.error.issues[0].message };
   const c = await context(clientId);
   if ("error" in c) return c;
   const d = p.data;
-  let rule: object;
-  if (d.source === "website") {
-    if (!c.client.pixel_id) return { ok: false, error: "Connect a Meta Pixel for this client first." };
-    rule = {
-      inclusions: {
-        operator: "or",
-        rules: [
-          {
-            event_sources: [{ id: c.client.pixel_id, type: "pixel" }],
-            retention_seconds: Math.min(d.days, 180) * 86400,
-            filter: { operator: "and", filters: [{ field: "url", operator: "i_contains", value: d.urlContains ?? "" }] },
-          },
-        ],
-      },
-    };
-  } else {
-    const fb = d.source === "facebook_page";
-    const sourceId = fb ? c.client.page_id : c.client.instagram_actor_id;
-    if (!sourceId) return { ok: false, error: fb ? "Pick this client's Facebook Page first." : "Connect this client's Instagram account first." };
-    rule = {
-      inclusions: {
-        operator: "or",
-        rules: [
-          {
-            event_sources: [{ id: sourceId, type: fb ? "page" : "ig_business" }],
-            retention_seconds: d.days * 86400,
-            filter: { operator: "and", filters: [{ field: "event", operator: "eq", value: fb ? "page_engaged" : "ig_business_profile_all" }] },
-          },
-        ],
-      },
-    };
-  }
+  const fb = d.source === "facebook_page";
+  const sourceId = fb ? c.client.page_id : c.client.instagram_actor_id;
+  if (!sourceId) return { ok: false, error: fb ? "Pick this client's Facebook Page first." : "Connect this client's Instagram account first." };
+  const rule = {
+    inclusions: {
+      operator: "or",
+      rules: [
+        {
+          event_sources: [{ id: sourceId, type: fb ? "page" : "ig_business" }],
+          retention_seconds: d.days * 86400,
+          filter: { operator: "and", filters: [{ field: "event", operator: "eq", value: fb ? "page_engaged" : "ig_business_profile_all" }] },
+        },
+      ],
+    },
+  };
   try {
     const created = await graphPost<{ id?: string }>(`${c.account}/customaudiences`, c.token, { name: d.name, rule: JSON.stringify(rule), prefill: true });
     if (!created.id) return { ok: false, error: "Meta didn't return an audience id." };
-    return { ok: true, audience: { id: created.id, name: d.name, kind: d.source === "website" ? "website" : "engagement", size: null, status: "Filling — ready shortly", usable: true } };
+    return { ok: true, audience: { id: created.id, name: d.name, kind: "engagement", size: null, status: "Filling — ready shortly", usable: true } };
   } catch (e) {
     return fail(e, c.account);
   }

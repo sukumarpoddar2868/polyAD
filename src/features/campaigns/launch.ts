@@ -1,7 +1,6 @@
 import "server-only";
 import { getClient } from "@/features/clients/data";
 import { getConnectionToken } from "@/features/meta-connect/store";
-import { metaEnv } from "@/lib/env";
 import { buildAll } from "./engine/builders.ts";
 import { checkPilotGuard, PilotGuardError } from "./engine/guard.ts";
 import { runMock } from "./engine/mock-adapter.ts";
@@ -29,7 +28,6 @@ export async function launchCampaign(
   clientId: number,
   input: LaunchInput,
   mode: AdapterMode,
-  options: { conversionTrackingVerified?: boolean } = {},
 ): Promise<LaunchOutcome> {
   const client = await getClient(userId, clientId);
   if (!client) return { ok: false, error: "Client not found." };
@@ -63,7 +61,8 @@ export async function launchCampaign(
 
   if (!input.imageHash && !input.video && !input.carousel?.cards.length) return { ok: false, error: "Upload your image or video first.", spec };
   try {
-    checkPilotGuard(ops, metaEnv().CONVERSION_TRACKING_VERIFIED || Boolean(options.conversionTrackingVerified));
+    // PolyAd has no Pixel: website conversions are never allowed.
+    checkPilotGuard(ops, false);
   } catch (e) {
     if (e instanceof PilotGuardError) return { ok: false, error: e.message, spec };
     throw e;

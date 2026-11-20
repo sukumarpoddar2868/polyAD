@@ -30,7 +30,6 @@ export type AdAccountOption = {
   businessName: string | null;
 };
 export type PageOption = { id: string; name: string; instagram: { id: string; username: string } | null };
-export type PixelOption = { id: string; name: string };
 
 export type Discovery = { metaUser: { id: string; name: string }; adAccounts: AdAccountOption[]; pages: PageOption[] };
 
@@ -77,13 +76,6 @@ export async function discoverAssets(token: string): Promise<Discovery> {
         : null,
     })),
   };
-}
-
-export async function listPixels(token: string, adAccountId: string): Promise<PixelOption[]> {
-  const pixels = await graphList<{ id: string; name?: string }>(`${actId(adAccountId)}/adspixels`, token, { fields: "id,name" }).catch(
-    () => [],
-  );
-  return pixels.map((p) => ({ id: p.id, name: p.name || `Pixel ${p.id}` }));
 }
 
 export const actId = (id: string) => (id.startsWith("act_") ? id : `act_${id}`);
@@ -171,7 +163,6 @@ export const metaLinks = {
   createAdAccount: "https://business.facebook.com/settings/ad-accounts",
   linkInstagram: "https://business.facebook.com/settings/instagram-account-v2s",
   nondiscrimination: "https://www.facebook.com/certification/nondiscrimination",
-  eventsManager: "https://business.facebook.com/events_manager2",
 };
 
 /** Below this much left under the account spending limit we warn (about one day of a starter budget). */
@@ -183,7 +174,6 @@ export function buildReadiness(input: {
   pageId: string | null;
   pageName: string | null;
   instagramUsername: string | null;
-  pixelName: string | null;
   health: AccountHealth | null;
   healthError: string | null;
   /** True once Shryxa has created an ad for this client (proves this login accepted the policy). */
@@ -280,17 +270,6 @@ export function buildReadiness(input: {
           state: "optional",
           detail: "Without one, Instagram ads use your Facebook Page's name and picture.",
           action: { label: "Link Instagram in Meta", href: metaLinks.linkInstagram },
-        },
-  );
-  items.push(
-    input.pixelName
-      ? { key: "pixel", label: "Pixel", state: "ok", detail: input.pixelName }
-      : {
-          key: "pixel",
-          label: "Pixel (website ads only)",
-          state: "optional",
-          detail: "Needed to track results on your website. Not needed for lead-form ads.",
-          action: { label: "Open Events Manager", href: metaLinks.eventsManager },
         },
   );
   return items;

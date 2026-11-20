@@ -2,11 +2,10 @@ import "server-only";
 import { z } from "zod";
 import { saveClientAssets } from "@/features/clients/data";
 import { MetaApiError } from "@/lib/meta/graph";
-import { discoverAssets, listPixels } from "./discovery";
+import { discoverAssets } from "./discovery";
 import { getConnectionToken, markConnection } from "./store";
 
-// Each field may be absent: browsers don't submit disabled <select>s
-// (e.g. Pixel before an ad account is saved).
+// Each field may be absent (Instagram is optional).
 const optionalId = z
   .string()
   .trim()
@@ -19,7 +18,6 @@ export const AssetFormSchema = z.object({
   adAccountId: optionalId,
   pageId: optionalId,
   instagramId: optionalId,
-  pixelId: optionalId,
 });
 
 export type AssetFormState = { error?: string; saved?: boolean };
@@ -49,12 +47,6 @@ export async function applyAssetSelection(userId: number, clientId: number, conn
     const ig = pick.instagramId && page?.instagram?.id === pick.instagramId ? page.instagram : null;
     if (pick.instagramId && !ig) return { error: "That Instagram account isn't linked to the selected Page." };
 
-    let pixel: { id: string; name: string } | null = null;
-    if (pick.pixelId && account) {
-      pixel = (await listPixels(token, account.id)).find((p) => p.id === pick.pixelId) ?? null;
-      if (!pixel) return { error: "That Pixel doesn't belong to the selected ad account." };
-    }
-
     await saveClientAssets(userId, clientId, {
       adAccountId: account?.accountId ?? null,
       adAccountName: account?.name ?? null,
@@ -62,8 +54,6 @@ export async function applyAssetSelection(userId: number, clientId: number, conn
       pageName: page?.name ?? null,
       instagramId: ig?.id ?? null,
       instagramUsername: ig?.username ?? null,
-      pixelId: pixel?.id ?? null,
-      pixelName: pixel?.name ?? null,
     });
     return { saved: true };
   } catch (e) {
