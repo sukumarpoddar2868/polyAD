@@ -1,0 +1,44 @@
+{
+  "name": "polyad",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "seed:admin": "node --env-file=.env.local scripts/seed-admin.mts",
+    "test:engine": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/features/campaigns/engine/*.test.ts src/features/leads/*.test.ts src/features/campaigns/geo/*.test.ts src/features/campaigns/create/*.test.ts src/features/constituencies/*.test.ts",
+    "setup:storage": "node --env-file=.env.local scripts/setup-storage.mts",
+    "predev": "node scripts/copy-map-worker.mjs",
+    "prebuild": "node scripts/copy-map-worker.mjs",
+    "build:constituencies": "node scripts/build-constituencies.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
+    "bcryptjs": "^3.0.3",
+    "lucide-react": "^1.70.0",
+    "maplibre-gl": "6.15.0",
+    "next": "16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@turf/helpers": "7.2.0",
+    "@turf/simplify": "7.2.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "shapefile": "0.6.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@12.3.4"
+}

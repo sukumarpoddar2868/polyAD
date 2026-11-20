@@ -1,0 +1,374 @@
+"use client";
+
+import { useId, useState, useTransition } from "react";
+import { Landmark, MapPin, Plus, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/field";
+import { Callout } from "@/components/ui/surface";
+import { LANGUAGE_TO_LOCALES } from "../engine/presets.ts";
+import { resolveAreaAction } from "../ai/actions";
+import dynamic from "next/dynamic";
+import { SCOPE_INFO, type ReachScope } from "../ai/prompts.ts";
+import { DEVICE_LABELS, isPlaced, type DeviceOs, type DraftPin, type GeoRef } from "./blueprint";
+import type { SectionProps } from "./create-campaign";
+import { AudienceEstimate } from "./audience-estimate";
+import { AudienceTargeting } from "./audience-targeting";
+import { SeatPicker } from "@/features/constituencies/components/seat-picker";
+import { ChipInput, ChoiceCard, Group, Header, Segmented, set } from "./sections";
+
+// Map is browser-only (WebGL); loads after the page.
+const AreaMap = dynamic(() => import("./area-map"), {
+  ssr: false,
+  loading: () => <div className="grid h-72 place-items-center rounded-card bg-lavender-soft text-[13px] text-ink-muted">Loading map…</div>,
+});
+
+/** Radius for a pin dropped on the map, by reach scope. */
+const SCOPE_RADIUS: Record<ReachScope, number> = { "hyper-local": 1.5, local: 5, "city-wide": 15, metro: 40 };
+
+/** Slider stops in km: finer steps at the small end, where a local business cares most. Meta's smallest circle is 1 km. */
+const PIN_KM = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80];
+/** Meta city ids: the city itself, or the city + 17–80 km around it. */
+const CITY_PLUS_KM = [17, 20, 25, 30, 40, 50, 60, 70, 80];
+/**
+ * A circle around a Meta area's centre instead of the area itself.
+ * Measured on Meta's audience estimate, Nov 2026: for a town a circle reaches fewer people than
+ * the whole town; for a neighbourhood it reaches far more, because Meta's neighbourhood ids are
+ * its tightest areas. So the toggle says "Smaller" for a town and "Wider circle" for a neighbourhood.
+ */
+const CIRCLE_KM = { city: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15], area: [1, 1.5, 2, 2.5, 3, 4, 5] };
+/** How a Meta area is targeted: the area itself, a circle round its centre, or (towns) the town plus a ring. */
+type SizeMode = "whole" | "circle" | "plus";
+const AREA_KIND: Record<string, string> = { city: "Town / city", neighborhood: "Neighbourhood", subcity: "Area", zip: "PIN code", pin: "Pin", circle: "Circle" };
+/** Toggle label for "Meta's own area". Short, because the toggle sits in a narrow card. */
+const WHOLE: Record<GeoRef["kind"], string> = { city: "Whole town", neighborhood: "Neighbourhood", subcity: "Whole area", zip: "PIN area" };
+/** Circle drawn on the map for a Meta area (Meta targets its own shape, not this circle). */
+const DISPLAY_KM: Record<GeoRef["kind"], number> = { city: 5, neighborhood: 1.5, subcity: 1.5, zip: 3 };
+
+const nearest = (stops: number[], km: number) => stops.reduce((best, s, i) => (Math.abs(s - km) < Math.abs(stops[best] - km) ? i : best), 0);
+
+/** A bar with a handle: slide to make the radius bigger or smaller. Moves along `stops`. */
+function RadiusSlider({ name, stops, km, onChange, text = (v) => `${v} km` }: { name: string; stops: number[]; km: number; onChange: (km: number) => void; text?: (km: number) => string }) {
+  const at = nearest(stops, km);
+  return (
+    <div className="flex w-full items-center gap-3">
+      <span className="shrink-0 text-[12px] text-ink-muted tabular-nums">{stops[0]} km</span>
+      <input
+        type="range"
+        min={0}
+        max={stops.length - 1}
+        step={1}
+        value={at}
+        onChange={(e) => onChange(stops[Number(e.target.value)])}
+        aria-label={`Radius for ${name}`}
+        aria-valuetext={text(stops[at])}
+        className="h-6 min-w-0 flex-1 cursor-pointer accent-lavender-deep"
+      />
+      <span className="shrink-0 text-[12px] text-ink-muted tabular-nums">{stops[stops.length - 1]} km</span>
+      <output className="w-20 shrink-0 rounded-pill bg-paper px-2 py-1 text-center text-[14px] font-bold tabular-nums">{text(km)}</output>
+    </div>
+  );
+}
+
+export function AudienceSection({ draft, update, goTo, clients }: SectionProps) {
+  const a = draft.audience;
+  const ageId = useId();
+  const ages = Array.from({ length: 65 - 18 + 1 }, (_, i) => 18 + i);
+  const [area, setArea] = useState("");
+  const [areaError, setAreaError] = useState<string | null>(null);
+  const [areaNote, setAreaNote] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const [addMode, setAddMode] = useState(false);
+
+  const setPins = (fn: (p: DraftPin[]) => DraftPin[]) => update((d) => ({ ...d, audience: { ...d.audience, locations: fn(d.audience.locations) } }));
+
+  const addArea = () => {
+    const city = area.trim();
+    if (!city || !draft.clientId) return;
+    setAreaError(null);
+    setAreaNote(null);
+    start(async () => {
+      const r = await resolveAreaAction({
+        clientId: draft.clientId!,
+        city,
+        scope: draft.setup.scope,
+        businessName: draft.setup.businessName,
+        about: draft.setup.about,
+        currency: draft.campaign.currency,
+      });
+      if (!r.ok) return setAreaError(r.error);
+      setPins((p) => [...p, ...r.pins.map((x) => ({ name: x.name, lat: x.lat, lng: x.lng, radiusKm: x.radius_km, why: x.why, geo: x.geo }))]);
+      setArea("");
+      setAreaNote(r.notes[0] ?? null);
+    });
+  };
+
+  // Constituency circles are shown and removed as one group per seat.
+  const seats = [...new Map(a.locations.filter((p) => p.seat).map((p) => [p.seat!.no, { ...p.seat!, pins: a.locations.filter((x) => x.seat?.no === p.seat!.no) }])).values()];
+
+  return (
+    <>
+      <Header level="Ad set" title="Audience" blurb="Who should see the ad. For local businesses, a tight area matters more than anything else." />
+      <div className="flex flex-col gap-6">
+        <AudienceEstimate draft={draft} />
+
+        <Group title="Who to target" hint="Core audience works for most local businesses. Add custom or lookalike audiences when you have customers or engagers.">
+          <AudienceTargeting draft={draft} update={update} client={clients.find((c) => c.id === draft.clientId)} />
+        </Group>
+
+        <Group
+          title="Locations"
+          hint={`Towns, neighbourhoods and PIN codes use Meta’s own areas; pins are circles. A neighbourhood is the tightest area Meta offers. For a town you can switch to a smaller circle. Slide the bar to change a radius; the audience size above shows the effect. Scope: ${SCOPE_INFO[draft.setup.scope].label}.`}
+        >
+          {!draft.generated && a.locations.length === 0 && (
+            <Callout>
+              Areas are picked by AI in{" "}
+              <button type="button" onClick={() => goTo("start")} className="font-bold text-tomato-700 hover:underline">
+                Start
+              </button>
+              . You can also add one below.
+            </Callout>
+          )}
+
+          {seats.length > 0 && (
+            <ul className="flex flex-col gap-2">
+              {seats.map((s) => (
+                <li key={s.no} className="flex items-start gap-3 rounded-card bg-lavender-soft p-3">
+                  <Landmark className="mt-1 size-4 shrink-0 text-lavender-deep" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-bold">
+                      {s.no} · {s.name}
+                    </p>
+                    <p className="text-[13px] text-ink-muted">
+                      Assembly seat · {s.pins.length} circles × {s.pins[0].radiusKm} km · covers ~{Math.round(s.coverage * 100)}% of the seat
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPins((all) => all.filter((x) => x.seat?.no !== s.no))}
+                    className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-paper"
+                    aria-label={`Remove ${s.name}`}
+                  >
+                    <X className="size-4" aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {a.locations.some((p) => !p.seat) && (
+            <ul className="flex flex-col gap-2">
+              {a.locations.map((p, i) => {
+                if (p.seat) return null;
+                // The Meta area this row is, or the one its circle was made from.
+                const ref = p.geo ?? p.origin ?? null;
+                const isCity = ref?.kind === "city";
+                // A circle needs the area's own centre. A PIN is only shown at its town's centre, so no circle for it.
+                const canCircle = ref !== null && ref.kind !== "zip" && isPlaced(p);
+                const mode: SizeMode = !p.geo ? "circle" : isCity && p.radiusKm >= 17 ? "plus" : "whole";
+                const modes: { value: SizeMode; label: string }[] = ref
+                  ? [
+                      { value: "whole" as const, label: WHOLE[ref.kind] },
+                      ...(canCircle ? [{ value: "circle" as const, label: isCity ? "Smaller" : "Wider circle" }] : []),
+                      ...(isCity ? [{ value: "plus" as const, label: "Bigger" }] : []),
+                    ]
+                  : [];
+                const patch = (next: Partial<DraftPin>) => setPins((all) => all.map((x, j) => (j === i ? { ...x, ...next } : x)));
+                const setMode = (m: SizeMode) => {
+                  if (!ref || m === mode) return;
+                  if (m === "whole") patch({ geo: ref, origin: null, radiusKm: DISPLAY_KM[ref.kind] });
+                  else if (m === "plus") patch({ geo: ref, origin: null, radiusKm: CITY_PLUS_KM[0] });
+                  else patch({ geo: null, origin: ref, radiusKm: isCity ? 3 : 1 });
+                };
+                return (
+                  <li key={`${p.name}-${i}`} className="flex flex-col gap-2 rounded-card bg-lavender-soft p-3">
+                    <div className="flex items-start gap-3">
+                      <MapPin className="mt-1 size-4 shrink-0 text-lavender-deep" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[14px] font-bold">{p.name}</p>
+                        {p.why && <p className="text-[13px] text-ink-muted">{p.why}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPins((all) => all.filter((_, j) => j !== i))}
+                        className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-paper"
+                        aria-label={`Remove ${p.name}`}
+                      >
+                        <X className="size-4" aria-hidden />
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-2.5 pl-7">
+                      <p className="text-[12px] text-ink-muted">
+                        <span className="mr-1.5 rounded-pill bg-paper px-2 py-0.5 font-bold text-lavender-deep">{AREA_KIND[p.geo?.kind ?? (p.origin ? "circle" : "pin")]}</span>
+                        {p.geo ? (
+                          `Meta's own area${mode === "plus" ? ` + ${p.radiusKm} km around it` : ""}${isPlaced(p) ? "" : " · not on the map right now"}`
+                        ) : p.origin ? (
+                          isCity ? `Only within ${p.radiusKm} km of the centre` : `Within ${p.radiusKm} km of its centre`
+                        ) : (
+                          <span className="tabular-nums">{p.lat?.toFixed(4)}, {p.lng?.toFixed(4)}</span>
+                        )}
+                      </p>
+                      {modes.length > 1 && <Segmented label={`Size of ${p.name}`} value={mode} onChange={setMode} options={modes} variant="bar" />}
+                      {/* The bar: a plain pin, a circle made from a Meta area, or a town plus a ring. */}
+                      {!ref && <RadiusSlider name={p.name} stops={PIN_KM} km={p.radiusKm} onChange={(km) => patch({ radiusKm: km })} />}
+                      {ref && mode === "circle" && <RadiusSlider name={p.name} stops={isCity ? CIRCLE_KM.city : CIRCLE_KM.area} km={p.radiusKm} onChange={(km) => patch({ radiusKm: km })} />}
+                      {ref && mode === "plus" && <RadiusSlider name={p.name} stops={CITY_PLUS_KM} km={p.radiusKm} onChange={(km) => patch({ radiusKm: km })} text={(v) => `+ ${v} km`} />}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <SeatPicker taken={seats.map((s) => s.no)} room={200 - a.locations.length} onAdd={(pins) => setPins((all) => [...all, ...pins])} />
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="add-area" className="text-[13px] font-bold">
+              Add another area
+            </label>
+            <div className="flex gap-2">
+              <Input
+                id="add-area"
+                value={area}
+                placeholder="e.g. Whitefield, Bangalore · Chaibasa · 833201"
+                onChange={(e) => setArea(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addArea();
+                  }
+                }}
+              />
+              <Button type="button" variant="secondary" onClick={addArea} disabled={pending || !area.trim() || !draft.clientId}>
+                <Plus className="size-4" aria-hidden />
+                {pending ? "Finding…" : "Add"}
+              </Button>
+            </div>
+            {areaError && <p className="text-[13px] text-tomato-700">{areaError}</p>}
+            {areaNote && <p className="text-[13px] text-ink-muted">{areaNote}</p>}
+            <p className="text-[12px] text-ink-muted">Type a town, &ldquo;Area, City&rdquo; (e.g. HSR Layout, Bangalore) or a 6-digit PIN code.</p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[13px] text-ink-muted">Drag a numbered pin to move an area.</p>
+              <Button type="button" size="sm" variant={addMode ? "primary" : "secondary"} onClick={() => setAddMode((v) => !v)} aria-pressed={addMode}>
+                <MapPin className="size-4" aria-hidden /> {addMode ? "Click the map to drop a pin…" : "Add pin by clicking"}
+              </Button>
+            </div>
+            <AreaMap
+              pins={a.locations}
+              addMode={addMode}
+              onMove={(i, lat, lng) =>
+                // A moved Meta area (or a circle tightened from one) becomes a plain circle where it was dropped.
+                setPins((all) =>
+                  all.map((x, j) =>
+                    j === i
+                      ? {
+                          ...x,
+                          lat,
+                          lng,
+                          geo: null,
+                          origin: null,
+                          name: x.geo || x.origin ? `${x.name} (moved)` : x.name,
+                          radiusKm: x.geo ? (x.geo.kind === "city" ? Math.max(5, Math.min(x.radiusKm, 25)) : 1.5) : x.radiusKm,
+                        }
+                      : x,
+                  ),
+                )
+              }
+              onAdd={(lat, lng) => {
+                setPins((all) => [...all, { name: `Dropped pin ${all.length + 1}`, lat, lng, radiusKm: SCOPE_RADIUS[draft.setup.scope], why: "Added on the map" }]);
+                setAddMode(false);
+              }}
+            />
+          </div>
+        </Group>
+
+        <Group title="People">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field id={`${ageId}-min`} label="Age from">
+              <Select id={`${ageId}-min`} value={a.ageMin} onChange={(e) => set(update, "audience", { ageMin: Number(e.target.value), ageMax: Math.max(a.ageMax, Number(e.target.value)) })}>
+                {ages.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field id={`${ageId}-max`} label="Age to">
+              <Select id={`${ageId}-max`} value={a.ageMax} onChange={(e) => set(update, "audience", { ageMax: Number(e.target.value) })}>
+                {ages.filter((n) => n >= a.ageMin).map((n) => (
+                  <option key={n} value={n}>
+                    {n === 65 ? "65+" : n}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field id="language" label="Language">
+              <Select id="language" value={a.language} onChange={(e) => set(update, "audience", { language: e.target.value })}>
+                {Object.keys(LANGUAGE_TO_LOCALES).map((l) => (
+                  <option key={l}>{l}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          {a.why && <p className="rounded-input bg-chartreuse-soft px-3 py-2 text-[13px]">AI: {a.why}</p>}
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-[13px] font-bold">Gender</span>
+            <Segmented
+              label="Gender"
+              value={a.gender}
+              onChange={(v) => set(update, "audience", { gender: v })}
+              options={[
+                { value: "any", label: "All" },
+                { value: "female", label: "Women" },
+                { value: "male", label: "Men" },
+              ]}
+            />
+          </div>
+        </Group>
+
+        <Group title="Phone type" hint="Reach only Android or only iPhone users. iPhone-only is a common way to reach higher-income buyers.">
+          <Segmented
+            label="Phone type"
+            value={a.device}
+            onChange={(v: DeviceOs) =>
+              update((d) => ({
+                ...d,
+                audience: { ...d.audience, device: v },
+                // Meta allows phone targeting only with manual placements.
+                placements: v === "all" ? d.placements : { ...d.placements, mode: "manual" },
+              }))
+            }
+            options={(Object.keys(DEVICE_LABELS) as DeviceOs[]).map((k) => ({ value: k, label: DEVICE_LABELS[k] }))}
+          />
+          {a.device !== "all" && (
+            <p className="text-[13px] text-ink-muted">Ads show on phones only, and Placements switch to manual (Meta&apos;s rule for phone targeting).</p>
+          )}
+        </Group>
+
+        <Group title="Interests" hint="Matched to real Meta interests at launch (closest match each). Leave empty to reach everyone in your areas who fits the age and gender.">
+          <ChipInput id="interests" values={a.interests} max={5} onChange={(v) => set(update, "audience", { interests: v })} placeholder="e.g. Personal finance" />
+        </Group>
+
+        <Group title="Audience mode">
+          <div role="radiogroup" aria-label="Audience mode" className="grid gap-3 sm:grid-cols-2">
+            <ChoiceCard
+              title="Local & strict"
+              blurb="Only people matching your area, age and gender. Best for new accounts and small areas."
+              badge="Recommended"
+              selected={a.mode === "strict"}
+              onSelect={() => set(update, "audience", { mode: "strict" })}
+            />
+            <ChoiceCard
+              title="Let Meta find people"
+              blurb="Advantage+ audience: Meta may go beyond your settings, but stays inside your areas."
+              selected={a.mode === "advantage"}
+              onSelect={() => set(update, "audience", { mode: "advantage" })}
+            />
+          </div>
+        </Group>
+      </div>
+    </>
+  );
+}
